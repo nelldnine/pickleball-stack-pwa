@@ -1,0 +1,54 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #faf9f7;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f2f0ec;
+  --color-border: rgba(23, 24, 26, 0.09);
+  --color-text: #17181a;
+  --color-text-soft: #6c6e72;
+  --color-accent: #ff5a36;
+  --color-accent-ink: #1a0d08;
+  --color-danger: #cf4335;
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #131315;
+    --color-surface: #1c1c1f;
+    --color-surface-sunken: #202023;
+    --color-border: rgba(244, 244, 243, 0.1);
+    --color-text: #f2f1ee;
+    --color-text-soft: #97989c;
+    --color-accent: #ff7a56;
+    --color-accent-ink: #1a0d08;
+    --color-danger: #ff6f63;
+  }
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+}
+
+/* Prevent iOS Safari double-tap zoom on rapid score taps */
+button {
+  touch-action: manipulation;
+}
