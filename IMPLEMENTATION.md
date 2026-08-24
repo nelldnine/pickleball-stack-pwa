@@ -247,11 +247,27 @@ side. Implement this as:
      they always stand there, and their partner is placed on the remaining
      side.
 2. Return one entry per player: `{ playerId, team, stackedSide, role
-   ('server'|'partner'), requiredSide? }` so the UI can render a 2×2 court
-   diagram and a text list ("must stand ad" vs. "free to stack").
+   ('server' | 'receiver' | 'partner'), requiredSide }` so the UI can render a
+   2×2 court diagram and a text list ("must stand ad" vs. "free to stack").
+   `requiredSide` is non-null only for the two players the rules actually pin
+   down (the server, and the receiver diagonally opposite them); everyone else
+   is free to stack.
+
+**Critical invariant: a team's two players must never be assigned the same
+`stackedSide`.** Two people cannot stand in one service court, and the diagram
+renders one player per quadrant — so a collision silently erases a player from
+the court view. This is reachable through ordinary input: if the server is
+pinned to the deuce side by the score and their partner has *also* chosen
+"deuce side," a naive implementation puts both on the right. Resolve it by
+anchoring on the rules-mandated player (server/receiver) and forcing the
+partner to the opposite side when their preference would collide. Verify this
+exhaustively across every combination of the four players' preferences
+(`ad`/`deuce`/`flexible`/unset), both serving teams, either player serving, and
+both score parities.
 
 This function is pure and only needs `teams`, `stacking`, which team is
-serving, who the server is, and that team's current score.
+serving, who the server is, and that team's current score. It deliberately does
+not model server rotation (1st/2nd server) — teams track that themselves.
 
 ---
 
@@ -261,6 +277,9 @@ Single-page app, bottom tab bar, no router (this is a small, always-authenticate
 local-only tool — a router adds nothing). Tabs:
 
 - **Players** — add/remove players, toggle `active` ("Playing"), see handedness.
+  Players currently in a live game are flagged "on court" and cannot be removed
+  — deleting one would leave its scoreboard rendering `?` for a player that no
+  longer exists.
 - **Next Round** — the fairness engine's suggested 4 (editable), team split
   (with "try another pairing" / tap-to-swap / lock-a-pair-together), optional
   per-player stacking side, and a "Start Game" action. Also embeds itself
@@ -342,25 +361,78 @@ declaration to a utility class), then override the color values under a
 
 ```css
 @theme {
-  --color-bg: #faf9f7;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #f2f0ec;
-  --color-border: rgba(23, 24, 26, 0.09);
-  --color-text: #17181a;
-  --color-text-soft: #6c6e72;
-  --color-accent: #ff5a36;
-  --color-accent-ink: #1a0d08;  /* text color to use on top of --color-accent */
-  --color-danger: #cf4335;
+  --color-paper: #f6f5f3;   /* page ground */
+  --color-surface: #ffffff; /* cards */
+  --color-sunken: #eeece8;  /* pressed states, empty bar tracks */
+  --color-line: rgba(20, 24, 26, 0.1);
+  --color-ink: #14181a;
+  --color-muted: #6a6f73;
+  --color-faint: #9a9ea1;
+
+  --color-court: #0f6b63;      /* structure + data */
+  --color-court-soft: #d7e8e4;
+  --color-flare: #ff5b2e;      /* live / now / next */
+  --color-flare-ink: #2a0d02;  /* text on top of flare */
+
   --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Archivo', 'Inter', system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #131315;
-    --color-surface: #1c1c1f;
-    /* …redefine every token used above… */
-  }
-}
+/* No [data-theme] means "follow the OS". An explicit choice pins color-scheme,
+   which is what every light-dark() above resolves against — and it also re-skins
+   native controls (<select>, scrollbars) to match, which swapping custom
+   properties alone does not do. */
+:root                    { color-scheme: light dark; }
+:root[data-theme='light']{ color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+```
+
+Declaring each color once as `light-dark(light, dark)` is what makes the theme
+toggle cheap: there is no second dark palette to keep in sync, and a token
+*cannot* be missing its dark value. (Build tooling such as Lightning CSS
+polyfills `light-dark()` into paired custom properties and rewrites the
+`[data-theme]` rules to drive them, so support is broad — including for opacity
+modifiers like `bg-court/55`.)
+
+**Theme selection** is three-state — `system | light | dark`:
+
+- `system` must **remove** the attribute rather than write a resolved value, so
+  the CSS keeps following `prefers-color-scheme` live; also subscribe to that
+  media query so the app re-themes if the OS flips while open.
+- Store the choice **per device (localStorage), not in the app's backup data.**
+  A theme is a display preference, so importing a teammate's export should never
+  change your appearance.
+- Apply any saved theme from a tiny inline script **before first paint**, or an
+  explicit choice flashes the OS theme for a frame while the bundle loads.
+- Keep "match system" as a real option rather than a plain two-way switch — most
+  people want the app to follow their phone, and silently pinning a theme the
+  first time someone taps takes that away.
+
+**Give each accent exactly one job**, and don't let them drift:
+
+- `court` (deep teal) — structure and data: the court surface, ledger bars,
+  selected states, focus rings. Calm, informational.
+- `flare` (orange) — *live / now / do this next* only: the live-game dot, the
+  primary Start button, players owed court time. The moment it starts appearing
+  on ordinary UI it stops meaning anything.
+
+Both are drawn from the game's own materials (court surface, ball) rather than
+picked as brand colors, which is why they read as belonging to this app.
+
+**Typography** pairs a display face with the body face by *proportion* rather
+than style, so they contrast without clashing: **Archivo** on its variable width
+axis (expanded, tabular figures) for numerals and headings, **Inter** for dense
+UI text. Numerals are the hero content here — scores, counts, minutes, read at
+arm's length outdoors — so give them a dedicated class rather than just making
+body text big:
+
+```css
+.readout { font-family: var(--font-display);
+           font-variation-settings: 'wdth' 118;
+           font-feature-settings: 'tnum' 1; }
+.label   { font-family: var(--font-display);
+           font-variation-settings: 'wdth' 108;
+           text-transform: uppercase; letter-spacing: 0.09em; }
 ```
 
 Components then use one set of classes (`bg-surface`, `text-text-soft`,
@@ -371,15 +443,28 @@ override is ever needed, override the CSS variable in that scope, not the
 utility classes.
 
 Design notes that mattered in practice:
-- Pick **one** accent color and use neutrals for everything else — competing
-  accent colors (e.g. a bright color plus a second "warning" hue used for
-  ordinary UI) reads as busy/unpolished on a small screen.
+
+- **Make the product's purpose visible.** The app exists to divide court time
+  fairly, but rendering that as a column of text (`4 games · 52 min`) hides the
+  one thing the user actually needs. The signature element is a *fairness
+  ledger*: one bar per player, sorted **least court time first**, with the group
+  average marked, so the top of the list literally answers "who's up next" and
+  an unfair gap is visible without reading a single number.
+- **Only label the exception.** Show handedness solely when a player is
+  left-handed; right-handed is the default and stamping it on every row is pure
+  noise. Same rule for the "most owed" badge on the matchup — suppress it when
+  all four players are level, because a badge on every row distinguishes nothing.
+- **Spend boldness in one place.** The ledger is the memorable element; keep
+  everything around it quiet — hairline borders, no shadows, no gradients.
 - Use real iconography (small inline SVGs) rather than emoji for navigation —
-  emoji render inconsistently across platforms and skew the tone younger/more
-  casual than a utility app usually wants.
-- Big tabular-numeral score digits are the app's visual centerpiece; keep
-  everything else quiet (plain borders, no heavy shadows/glows) so the score
-  reads instantly at a glance from a few feet away.
+  emoji render inconsistently across platforms and skew the tone younger than a
+  utility app wants. Emoji are fine where they *are* the content: the ✊/✋
+  stacking hand-signals are the literal gestures players use.
+- **Dim only what is genuinely secondary.** The trailing team's score recedes,
+  but at a tie both read at full weight — muting both makes a live game look
+  disabled.
+- A title bar that only repeats the app name earns nothing on a phone. Make it
+  a session status strip (courts live, players free) or drop it.
 
 ---
 
@@ -391,6 +476,13 @@ while enabled and match simple phrases (e.g. "team a" / "team b" / "undo") to
 call the same `addPoint`/`undoLastPoint` actions the tap UI uses — voice input
 should never bypass the store's single mutation path.
 
+**Make the microphone exclusive across courts.** Each live scoreboard owns its
+own recognizer, but there is only one mic: if two courts are listening at once,
+a single "team a" is heard by both and scores a point on each game. Keep a
+module-level reference to whichever recognizer is currently listening and stop
+it when another starts; the stopped one's `onend` fires, so that scoreboard
+drops out of its listening state on its own.
+
 ---
 
 ## 10. Backup / portability
@@ -401,3 +493,14 @@ seasonStartedAt } }` as one JSON object; wire it to a "download as file" action
 does the reverse: validate the shape loosely (e.g. `Array.isArray(data.players)
 && Array.isArray(data.games)`) before bulk-writing, and merge settings only if
 present, so older export files without a `settings` key still import cleanly.
+
+Two easy mistakes here, both of which strand a stale standings boundary:
+
+- Test for **key presence**, not truthiness. `if (data.settings?.seasonStartedAt)`
+  treats an explicit `null` (a backup taken with no active boundary) the same as
+  "absent," so importing it leaves the old local boundary in place. Use
+  `'seasonStartedAt' in settings` and handle `null` as "clear it."
+- After reconciling the settings table, **read the state back from persistence
+  and treat it as authoritative** (`?? null` / `?? 1` for the defaults). Falling
+  back to the previous in-memory value (`?? get().seasonStartedAt`) resurrects
+  the very boundary the import just cleared.

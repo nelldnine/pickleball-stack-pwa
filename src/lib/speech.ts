@@ -56,3 +56,26 @@ export function createScoreRecognizer(onCommand: (cmd: SpeechCommand) => void): 
 
   return recognizer
 }
+
+/**
+ * There is only one microphone, so only one recognizer may listen at a time.
+ * With several courts live at once, two scoreboards listening would both hear
+ * "team a" and each score a point on their own game. Starting a recognizer
+ * therefore stops whichever one was listening before (its `onend` fires, so
+ * that scoreboard drops back out of its listening state on its own).
+ */
+let activeRecognizer: SpeechRecognitionLike | null = null
+
+export function startExclusively(recognizer: SpeechRecognitionLike) {
+  if (activeRecognizer && activeRecognizer !== recognizer) {
+    activeRecognizer.stop()
+  }
+  activeRecognizer = recognizer
+  recognizer.start()
+}
+
+export function stopRecognizer(recognizer: SpeechRecognitionLike | null) {
+  if (!recognizer) return
+  if (activeRecognizer === recognizer) activeRecognizer = null
+  recognizer.stop()
+}

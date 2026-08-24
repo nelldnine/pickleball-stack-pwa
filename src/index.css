@@ -1,35 +1,52 @@
 @import 'tailwindcss';
 
+/*
+ * Palette is grounded in the game's own materials rather than picked for looks,
+ * and each color carries one job:
+ *   court  — structure and data (the teal of a court surface). Calm, informational.
+ *   flare  — "live / now / do this next" (the orange of a ball). Never decorative.
+ * Everything else is ink on paper. Two meanings, not two brand colors.
+ *
+ * Every token is declared once as light-dark(<light>, <dark>). That resolves against
+ * the `color-scheme` set on :root below, so the manual theme toggle and the OS
+ * preference both work without a duplicated dark palette that could drift out of sync.
+ */
 @theme {
-  --color-bg: #faf9f7;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #f2f0ec;
-  --color-border: rgba(23, 24, 26, 0.09);
-  --color-text: #17181a;
-  --color-text-soft: #6c6e72;
-  --color-accent: #ff5a36;
-  --color-accent-ink: #1a0d08;
-  --color-danger: #cf4335;
+  --color-paper: light-dark(#f6f5f3, #101214);
+  --color-surface: light-dark(#ffffff, #191c1f);
+  --color-sunken: light-dark(#eeece8, #212528);
+  --color-line: light-dark(rgba(20, 24, 26, 0.1), rgba(240, 242, 243, 0.12));
+  --color-line-strong: light-dark(rgba(20, 24, 26, 0.22), rgba(240, 242, 243, 0.28));
+  --color-ink: light-dark(#14181a, #f0f2f3);
+  --color-muted: light-dark(#6a6f73, #9aa0a4);
+  --color-faint: light-dark(#9a9ea1, #6d7377);
+
+  --color-court: light-dark(#0f6b63, #3fb3a6);
+  --color-court-soft: light-dark(#d7e8e4, #16302e);
+
+  --color-flare: light-dark(#ff5b2e, #ff7a52);
+  --color-flare-ink: light-dark(#2a0d02, #220a02);
+  --color-flare-soft: light-dark(#ffe4da, #38180e);
+
+  --color-danger: light-dark(#c8402f, #ff6f5c);
 
   --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Archivo', 'Inter', system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #131315;
-    --color-surface: #1c1c1f;
-    --color-surface-sunken: #202023;
-    --color-border: rgba(244, 244, 243, 0.1);
-    --color-text: #f2f1ee;
-    --color-text-soft: #97989c;
-    --color-accent: #ff7a56;
-    --color-accent-ink: #1a0d08;
-    --color-danger: #ff6f63;
-  }
-}
-
+/*
+ * No [data-theme] attribute means "follow the OS". An explicit choice pins
+ * color-scheme, which is what every light-dark() token above resolves against —
+ * and it also re-skins form controls and scrollbars to match.
+ */
 :root {
   color-scheme: light dark;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 html,
@@ -41,8 +58,8 @@ body,
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: var(--color-bg);
-  color: var(--color-text);
+  background: var(--color-paper);
+  color: var(--color-ink);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overscroll-behavior-y: none;
@@ -51,4 +68,38 @@ body {
 /* Prevent iOS Safari double-tap zoom on rapid score taps */
 button {
   touch-action: manipulation;
+}
+
+/*
+ * Numerals are this app's hero content — scores, minutes, counts — so they get
+ * Archivo's expanded width axis and tabular figures: an instrument readout you
+ * can parse from a few feet away, not body text that happens to be big.
+ */
+.readout {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.02em;
+}
+
+.label {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 108;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+:where(button, a, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-court);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

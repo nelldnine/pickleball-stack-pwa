@@ -34,9 +34,37 @@ Games are not tied to a single "current game" — any number of games can have `
 
 `App.tsx` is a single-page app with bottom-tab navigation (`players` / `teams` / `game` / `history`, no router) rendering one top-level component per tab from `src/components/`. The Game tab renders one `Scoreboard` per currently-live game (stacked, labeled by court when there's more than one).
 
-### Theming
+### Theming and design system
 
-Tailwind v4 tokens are defined in `src/index.css` via `@theme` as CSS custom properties (`--color-bg`, `--color-surface`, `--color-text`, `--color-accent`, etc.), with dark-mode values overridden under `@media (prefers-color-scheme: dark)`. Components use one set of classes (e.g. `bg-surface`, `text-text-soft`) that adapt automatically — do not add `dark:` variant classes; add/override the CSS variables instead.
+Tailwind v4 tokens live in `src/index.css` under `@theme`. Every color is declared **once** as `light-dark(<light>, <dark>)`, which resolves against the `color-scheme` set on `:root` — so there is no duplicated dark palette that can drift, and a token physically cannot be missing its dark value. Components use one set of classes (`bg-surface`, `text-muted`, `border-line`, …) that adapt automatically — **do not add `dark:` variant classes**; change the token instead.
+
+Theme selection (`src/lib/theme.ts`) is `system | light | dark`:
+
+- `system` **removes** the `data-theme` attribute rather than writing a resolved value, so CSS keeps tracking `prefers-color-scheme` live (the hook also listens for OS changes while in this mode).
+- `:root[data-theme='light'|'dark']` pins `color-scheme`, which beats the media query on specificity and also re-skins native controls (`<select>`, scrollbars) — that's why the toggle sets `color-scheme` rather than just swapping variables.
+- It is stored in **localStorage, not the Dexie `settings` table**, because it is a per-device display preference and must not ride along in the JSON backup — importing a teammate's export should never change your appearance.
+- An inline script in `index.html` applies a saved theme before first paint; without it an explicit choice flashes the OS theme for a frame. It duplicates the two chrome colors, so update both places if the palette changes.
+
+Note: Lightning CSS (via Vite) polyfills `light-dark()` into `--lightningcss-light/dark` custom properties and rewrites the `[data-theme]` rules to drive them, so this works well beyond browsers with native `light-dark()` support, including with opacity modifiers like `bg-court/55`.
+
+Two accent colors, each with one job — they are not interchangeable:
+
+- `court` (deep teal) — structure and data: the court surface in the diagram, ledger bars, selected states, focus rings.
+- `flare` (orange) — **"live / now / do this next" only**: the live-game dot, the primary Start button, players owed court time. Never decorative; if it starts appearing on ordinary UI it stops meaning anything.
+
+Everything else is ink on paper (`ink`, `muted`, `faint`, `paper`, `surface`, `sunken`, `line`).
+
+Typography pairs **Archivo** (variable width axis, expanded) with **Inter**. Two helper classes carry this:
+
+- `.readout` — Archivo at `wdth 118` with tabular figures, for numerals and headings. Scores, counts, and minutes are the app's hero content and need to read from a few feet away.
+- `.label` — Archivo, uppercase, wide tracking, for small eyebrow/meta text.
+
+Design decisions worth preserving (they were deliberate, and each removed noise):
+
+- The roster shows handedness **only when it's left**. Right-handed is the default; printing it on every row is noise, and only the exception changes stacking.
+- The "most owed" badge on the Next Round matchup appears **only when it distinguishes someone**. If all four picked players are level it is suppressed — the same badge on every row explains nothing.
+- The ledger sorts **ascending** (least court time first), so the top of the list answers "who's up next".
+- The header is a session status strip (live courts / free players), not a repeated app title.
 
 ### Backup / portability
 

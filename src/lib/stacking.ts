@@ -40,29 +40,48 @@ export function courtPositionsForScore(
 
   const positions: CourtPosition[] = []
 
-  for (const pid of serverTeamPlayers) {
-    const isServer = pid === serverId
-    positions.push({
-      playerId: pid,
-      team: servingTeam,
-      role: isServer ? 'server' : 'partner',
-      requiredSide: isServer ? requiredServerSide : null,
-      stackedSide: isServer ? requiredServerSide : sideFor(stacking, pid, opposite(requiredServerSide)),
-    })
-  }
-
-  for (const pid of receivingTeamPlayers) {
-    const isReceiver = pid === receiverId
-    positions.push({
-      playerId: pid,
-      team: servingTeam === 'A' ? 'B' : 'A',
-      role: isReceiver ? 'receiver' : 'partner',
-      requiredSide: isReceiver ? requiredReceiverSide : null,
-      stackedSide: isReceiver ? requiredReceiverSide : sideFor(stacking, pid, opposite(requiredReceiverSide)),
-    })
-  }
+  positions.push(
+    ...placeTeam(serverTeamPlayers, servingTeam, serverId, 'server', requiredServerSide, stacking),
+  )
+  positions.push(
+    ...placeTeam(
+      receivingTeamPlayers,
+      servingTeam === 'A' ? 'B' : 'A',
+      receiverId,
+      'receiver',
+      requiredReceiverSide,
+      stacking,
+    ),
+  )
 
   return positions
+}
+
+/**
+ * Places a team's two players. The anchored player (server or receiver) is pinned to the
+ * side the rules require; the partner takes their preferred side, but is forced to the
+ * opposite side when that preference would collide — two players cannot stand in the same
+ * service court, and the court diagram renders one player per quadrant.
+ */
+function placeTeam(
+  teamPlayers: [string, string],
+  team: 'A' | 'B',
+  anchoredId: string,
+  anchoredRole: 'server' | 'receiver',
+  anchoredSide: CourtSide,
+  stacking: Game['stacking'],
+): CourtPosition[] {
+  return teamPlayers.map((pid) => {
+    const isAnchored = pid === anchoredId
+    const preferred = sideFor(stacking, pid, opposite(anchoredSide))
+    return {
+      playerId: pid,
+      team,
+      role: isAnchored ? anchoredRole : 'partner',
+      requiredSide: isAnchored ? anchoredSide : null,
+      stackedSide: isAnchored ? anchoredSide : preferred === anchoredSide ? opposite(anchoredSide) : preferred,
+    }
+  })
 }
 
 function pickReceiver(

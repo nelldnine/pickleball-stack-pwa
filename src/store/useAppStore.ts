@@ -173,11 +173,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   importData: async (data) => {
     await Promise.all([db.players.bulkPut(data.players), db.games.bulkPut(data.games)])
-    if (data.settings?.courtCount) {
+    // Distinguish "key absent" (older export — leave the local setting alone) from an
+    // explicit value, so importing a backup whose standings were reset actually clears
+    // the local boundary instead of silently keeping it.
+    if (data.settings?.courtCount !== undefined) {
       await db.settings.put({ key: 'courtCount', value: data.settings.courtCount })
     }
-    if (data.settings?.seasonStartedAt) {
-      await db.settings.put({ key: 'seasonStartedAt', value: data.settings.seasonStartedAt })
+    if (data.settings && 'seasonStartedAt' in data.settings) {
+      const season = data.settings.seasonStartedAt
+      if (season === null || season === undefined) await db.settings.delete('seasonStartedAt')
+      else await db.settings.put({ key: 'seasonStartedAt', value: season })
     }
     const [players, games, courtCountRow, seasonRow] = await Promise.all([
       db.players.toArray(),
@@ -185,11 +190,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       db.settings.get('courtCount'),
       db.settings.get('seasonStartedAt'),
     ])
+    // The settings table was just reconciled above, so it is authoritative here.
+    // Falling back to the previous in-memory value would resurrect a boundary the
+    // import had deliberately cleared.
     set({
       players,
       games,
-      courtCount: courtCountRow?.value ?? get().courtCount,
-      seasonStartedAt: seasonRow?.value ?? get().seasonStartedAt,
+      courtCount: courtCountRow?.value ?? 1,
+      seasonStartedAt: seasonRow?.value ?? null,
     })
   },
 }))

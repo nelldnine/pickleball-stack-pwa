@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..700&family=Inter:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -19,6 +19,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Apply a saved theme before first paint, otherwise an explicit choice flashes
+         the OS theme for a frame while the bundle loads. Kept inline and tiny on purpose. -->
+    <script>
+      try {
+        var t = localStorage.getItem('stacking:theme')
+        if (t === 'light' || t === 'dark') {
+          document.documentElement.dataset.theme = t
+          var m = document.querySelector('meta[name="theme-color"]')
+          if (m) m.setAttribute('content', t === 'dark' ? '#101214' : '#f6f5f3')
+        }
+      } catch (e) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
