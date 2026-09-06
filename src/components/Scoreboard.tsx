@@ -23,7 +23,6 @@ export function Scoreboard({
   const undoLastPoint = useAppStore((s) => s.undoLastPoint)
   const finishGame = useAppStore((s) => s.finishGame)
   const cancelGame = useAppStore((s) => s.cancelGame)
-  const setServe = useAppStore((s) => s.setServe)
   const sideOut = useAppStore((s) => s.sideOut)
 
   const [listening, setListening] = useState(false)
@@ -85,8 +84,7 @@ export function Scoreboard({
 
   const serve = serveOf(game)
   // 1st/2nd server resolves to a specific player the same way CourtVisualizer resolves it,
-  // so the name on the strip and the name on the court diagram can never disagree.
-  const servingPair = serve.team === 'A' ? game.teams.teamA : game.teams.teamB
+  // so the bold name on the score and the name on the court diagram can never disagree.
   const servingIndex = serve.server - 1
   // The doubles call: serving side's score, receiving side's score, server number.
   const call = `${serve.team === 'A' ? game.scoreA : game.scoreB}-${serve.team === 'A' ? game.scoreB : game.scoreA}-${serve.server}`
@@ -127,13 +125,7 @@ export function Scoreboard({
           />
         </div>
 
-        <ServeStrip
-          names={[nameOf(servingPair[0]), nameOf(servingPair[1])]}
-          call={call}
-          server={serve.server}
-          onServer={(server) => setServe(gameId, { team: serve.team, server })}
-          onSideOut={() => sideOut(gameId)}
-        />
+        <ServeStrip call={call} onSideOut={() => sideOut(gameId)} />
       </div>
 
       <div className="flex gap-2">
@@ -247,57 +239,26 @@ function TeamScoreButton({
 }
 
 /**
- * The serve is state the players carry in their heads between rallies, and the thing most
- * often lost in an argument mid-game. It sits on the bottom edge of the score card as one
- * row: which of the two partners is up, the doubles call ("4-2-2"), and the side out.
+ * What is left of the serve panel once the score card says who is serving: the doubles
+ * call, and the one button that moves the serve on. Everything else was a second way to
+ * read something already on screen.
  *
- * The two servers are named instead of labelled "1st"/"2nd" because a name is what gets
- * said on court — and because it collapses the old two-line panel, which repeated the pair
- * name that is already printed on the score above it, into a single strip.
+ * There is no 1st/2nd server picker any more. `sideOut` walks the serve through every
+ * legal position it can be in — 1st server, 2nd server, then over to the other team — so
+ * the only thing the picker did that this doesn't is jump straight to a state, which is
+ * not worth a control on a card you look at between rallies.
  */
-function ServeStrip({
-  names,
-  call,
-  server,
-  onServer,
-  onSideOut,
-}: {
-  names: [string, string]
-  call: string
-  server: 1 | 2
-  onServer: (server: 1 | 2) => void
-  onSideOut: () => void
-}) {
+function ServeStrip({ call, onSideOut }: { call: string; onSideOut: () => void }) {
   return (
-    <div className="flex items-center gap-2 border-t border-line px-2.5 py-2">
-      <div
-        className="flex min-w-0 flex-1 rounded-lg border border-line overflow-hidden"
-        role="group"
-        aria-label="Server"
-      >
-        {([1, 2] as const).map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onServer(n)}
-            aria-pressed={server === n}
-            aria-label={`${names[n - 1]} serving${n === 1 ? ' (1st server)' : ' (2nd server)'}`}
-            className={`min-h-11 min-w-0 flex-1 truncate px-2 text-xs transition-colors ${
-              server === n ? 'bg-court font-semibold text-white' : 'bg-surface text-muted'
-            }`}
-          >
-            {names[n - 1]}
-          </button>
-        ))}
-      </div>
-      <p className="readout shrink-0 text-base font-semibold tracking-tight" aria-label={`Call: ${call}`}>
+    <div className="flex items-center justify-between gap-3 border-t border-line px-3.5 py-2">
+      <p className="readout text-lg font-semibold tracking-tight" aria-label={`Call: ${call}`}>
         {call}
       </p>
       <button
         type="button"
         onClick={onSideOut}
         title="Serving team lost the rally"
-        className="min-h-11 shrink-0 rounded-lg border border-line bg-sunken px-3 label text-[0.55rem]"
+        className="min-h-11 shrink-0 rounded-lg border border-line bg-sunken px-4 label text-[0.55rem]"
       >
         Side out
       </button>
