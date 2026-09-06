@@ -26,6 +26,16 @@ export type PointEvent = {
   timestamp: number
 }
 
+/**
+ * Who is serving right now. `server` is the 1st/2nd server of that team, which is
+ * the third number in a doubles call ("4-2-2"). Like `stacking`, this is tracked,
+ * not inferred: the app does not model rally outcomes, so the players advance it.
+ */
+export interface ServeState {
+  team: 'A' | 'B'
+  server: 1 | 2
+}
+
 export interface Game {
   id: string
   createdAt: number
@@ -40,6 +50,8 @@ export interface Game {
   notes?: string
   /** 1-indexed court this game is/was played on. Defaults to 1 when absent (pre-multi-court data). */
   court?: number
+  /** Current serve. Absent on games recorded before serve tracking existed. */
+  serve?: ServeState
 }
 
 export interface PlayerStats {

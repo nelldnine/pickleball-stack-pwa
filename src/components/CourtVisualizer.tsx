@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { courtPositionsForScore } from '../lib/stacking'
+import { serveOf } from '../store/useAppStore'
 import type { Game } from '../types/models'
 
 export function CourtVisualizer({
@@ -9,8 +10,12 @@ export function CourtVisualizer({
   game: Game
   nameOf: (id: string) => string
 }) {
-  const [servingTeam, setServingTeam] = useState<'A' | 'B'>('A')
-  const serverId = servingTeam === 'A' ? game.teams.teamA[0] : game.teams.teamB[0]
+  // The serve lives on the game now, controlled from the scoreboard above — the diagram
+  // reads it rather than keeping a second, silently disagreeing copy.
+  const serve = serveOf(game)
+  const servingTeam = serve.team
+  const servingPair = servingTeam === 'A' ? game.teams.teamA : game.teams.teamB
+  const serverId = servingPair[serve.server - 1]
   const servingScore = servingTeam === 'A' ? game.scoreA : game.scoreB
 
   const positions = useMemo(
@@ -29,26 +34,12 @@ export function CourtVisualizer({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h3 className="label text-[0.58rem] text-muted">Court positions</h3>
-        <div className="flex gap-2" role="group" aria-label="Serving team">
-          <button
-            type="button"
-            onClick={() => setServingTeam('A')}
-            aria-pressed={servingTeam === 'A'}
-            className={`min-h-10 rounded-lg px-3 label text-[0.55rem] ${servingTeam === 'A' ? 'bg-ink text-paper' : 'bg-sunken text-muted'}`}
-          >
-            A serving
-          </button>
-          <button
-            type="button"
-            onClick={() => setServingTeam('B')}
-            aria-pressed={servingTeam === 'B'}
-            className={`min-h-10 rounded-lg px-3 label text-[0.55rem] ${servingTeam === 'B' ? 'bg-ink text-paper' : 'bg-sunken text-muted'}`}
-          >
-            B serving
-          </button>
-        </div>
+        <p className="label text-[0.55rem] text-flare flex items-center gap-1.5">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-flare" />
+          Team {servingTeam} serving
+        </p>
       </div>
 
       <svg

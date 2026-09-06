@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAppStore } from '../store/useAppStore'
+import { useAppStore, serveOf } from '../store/useAppStore'
 import { CourtVisualizer } from './CourtVisualizer'
 import {
   createScoreRecognizer,
@@ -22,6 +22,9 @@ export function Scoreboard({
   const addPoint = useAppStore((s) => s.addPoint)
   const undoLastPoint = useAppStore((s) => s.undoLastPoint)
   const finishGame = useAppStore((s) => s.finishGame)
+  const cancelGame = useAppStore((s) => s.cancelGame)
+  const setServe = useAppStore((s) => s.setServe)
+  const sideOut = useAppStore((s) => s.sideOut)
 
   const [listening, setListening] = useState(false)
   const recognizerRef = useRef<ReturnType<typeof createScoreRecognizer>>(null)
@@ -63,7 +66,30 @@ export function Scoreboard({
     onFinished()
   }
 
+  const handleCancel = async () => {
+    const played = game.history.length > 0
+    if (
+      !window.confirm(
+        played
+          ? `Cancel this game at ${game.scoreA}-${game.scoreB}? It is deleted outright — no result, and no court time for anyone in it.`
+          : 'Cancel this game? It is deleted outright and nobody is credited for it.',
+      )
+    )
+      return
+    stopRecognizer(recognizerRef.current)
+    await cancelGame(gameId)
+    onFinished()
+  }
+
   const leader = game.scoreA === game.scoreB ? null : game.scoreA > game.scoreB ? 'A' : 'B'
+
+  const serve = serveOf(game)
+  const servingNames =
+    serve.team === 'A'
+      ? `${nameOf(game.teams.teamA[0])} / ${nameOf(game.teams.teamA[1])}`
+      : `${nameOf(game.teams.teamB[0])} / ${nameOf(game.teams.teamB[1])}`
+  // The doubles call: serving side's score, receiving side's score, server number.
+  const call = `${serve.team === 'A' ? game.scoreA : game.scoreB}-${serve.team === 'A' ? game.scoreB : game.scoreA}-${serve.server}`
 
   return (
     <section aria-labelledby={`score-heading-${gameId}`} className="flex flex-col gap-3">
@@ -86,15 +112,25 @@ export function Scoreboard({
           label={`${nameOf(game.teams.teamA[0])} / ${nameOf(game.teams.teamA[1])}`}
           score={game.scoreA}
           trailing={leader === 'B'}
+          serving={serve.team === 'A'}
           onTap={() => addPoint(gameId, 'A')}
         />
         <TeamScoreButton
           label={`${nameOf(game.teams.teamB[0])} / ${nameOf(game.teams.teamB[1])}`}
           score={game.scoreB}
           trailing={leader === 'A'}
+          serving={serve.team === 'B'}
           onTap={() => addPoint(gameId, 'B')}
         />
       </div>
+
+      <ServePanel
+        names={servingNames}
+        call={call}
+        server={serve.server}
+        onServer={(server) => setServe(gameId, { team: serve.team, server })}
+        onSideOut={() => sideOut(gameId)}
+      />
 
       <div className="flex gap-2">
         <button
@@ -135,6 +171,16 @@ export function Scoreboard({
         <p className="label text-[0.55rem] text-flare">Listening · say "team a", "team b", or "undo"</p>
       )}
 
+      {/* Deliberately quiet and set apart from Finish: cancelling throws the game away,
+          so it should never be the button you hit reaching for the one next to it. */}
+      <button
+        type="button"
+        onClick={handleCancel}
+        className="min-h-11 self-center px-4 label text-[0.55rem] text-muted active:text-danger transition-colors"
+      >
+        Cancel game
+      </button>
+
       {game.stacking.enabled && <CourtVisualizer game={game} nameOf={nameOf} />}
     </section>
   )
@@ -144,19 +190,21 @@ function TeamScoreButton({
   label,
   score,
   trailing,
+  serving,
   onTap,
 }: {
   label: string
   score: number
   /** Only the side that is actually behind recedes — at a tie both read at full weight. */
   trailing: boolean
+  serving: boolean
   onTap: () => void
 }) {
   return (
     <button
       type="button"
       onClick={onTap}
-      aria-label={`Add 1 point to ${label}. Current score ${score}.`}
+      aria-label={`Add 1 point to ${label}. Current score ${score}.${serving ? ' Currently serving.' : ''}`}
       className="flex flex-col items-center gap-1.5 px-2 py-7 active:bg-sunken transition-colors"
     >
       <span className="text-[0.7rem] text-muted text-center leading-tight line-clamp-2 min-h-[2.1em] px-1">
@@ -171,7 +219,77 @@ function TeamScoreButton({
       >
         {score}
       </span>
-      <span className="label text-[0.5rem] text-faint">tap to score</span>
+      {/* One caption slot, two jobs: who is serving is worth more than a hint everyone
+          has already learned, so the flare marker takes the line when it applies. */}
+      {serving ? (
+        <span className="label text-[0.5rem] text-flare flex items-center gap-1.5">
+          <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-flare" />
+          serving
+        </span>
+      ) : (
+        <span className="label text-[0.5rem] text-faint">tap to score</span>
+      )}
     </button>
+  )
+}
+
+/**
+ * The serve is state the players carry in their heads between rallies, and it is the
+ * thing most often lost in an argument mid-game. It gets the doubles call as a readout
+ * ("4-2-2"), and one button per way the serve can legally move.
+ */
+function ServePanel({
+  names,
+  call,
+  server,
+  onServer,
+  onSideOut,
+}: {
+  names: string
+  call: string
+  server: 1 | 2
+  onServer: (server: 1 | 2) => void
+  onSideOut: () => void
+}) {
+  return (
+    <div className="rounded-2xl border border-line bg-surface px-3.5 py-3 flex flex-col gap-2.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0">
+          {/* The flare "serving" marker lives on the score above; repeating it here would
+              put a third orange dot on one screen and spend the color on ordinary UI. */}
+          <p className="label text-[0.5rem] text-faint">Serve</p>
+          <p className="text-sm truncate mt-0.5">{names}</p>
+        </div>
+        <p className="readout text-xl font-semibold shrink-0 tracking-tight" aria-label={`Call: ${call}`}>
+          {call}
+        </p>
+      </div>
+
+      <div className="flex gap-2">
+        <div className="flex flex-1 rounded-xl border border-line overflow-hidden" role="group" aria-label="Server">
+          {([1, 2] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onServer(n)}
+              aria-pressed={server === n}
+              className={`min-h-11 flex-1 label text-[0.55rem] transition-colors ${
+                server === n ? 'bg-court text-white' : 'bg-surface text-muted'
+              }`}
+            >
+              {n === 1 ? '1st server' : '2nd server'}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onSideOut}
+          title="Serving team lost the rally"
+          className="min-h-11 shrink-0 rounded-xl border border-line bg-sunken px-4 label text-[0.55rem]"
+        >
+          Side out
+        </button>
+      </div>
+    </div>
   )
 }

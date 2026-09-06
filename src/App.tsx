@@ -45,7 +45,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-full flex flex-col bg-paper text-ink">
+    <div className="h-full flex flex-col overflow-hidden bg-paper text-ink">
       {/* A title bar that only repeats the app name earns nothing on a phone.
           This one reports the state of the session, and spends its left edge on a
           control rather than on the word "Stacking". */}
@@ -65,7 +65,7 @@ function App() {
         </span>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-5 pb-28">
+      <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-8">
         {tab === 'players' && <PlayerRoster />}
         {tab === 'teams' && <NextRoundPanel onGameStarted={() => setTab('game')} />}
         {tab === 'game' &&
@@ -86,9 +86,12 @@ function App() {
         {tab === 'history' && <History onGameStarted={() => setTab('game')} />}
       </main>
 
+      {/* In normal flow at the end of a full-height flex column rather than `fixed`:
+          a fixed bar is positioned against a viewport that installed PWAs measure
+          differently, which is what left it floating above a blank strip. */}
       <nav
         aria-label="Sections"
-        className="fixed bottom-0 inset-x-0 grid grid-cols-4 border-t border-line bg-surface/92 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
+        className="shrink-0 grid grid-cols-4 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"
       >
         <TabButton label="Players" icon={<IconRoster />} active={tab === 'players'} onClick={() => setTab('players')} />
         <TabButton label="Next" icon={<IconShuffle />} active={tab === 'teams'} onClick={() => setTab('teams')} />

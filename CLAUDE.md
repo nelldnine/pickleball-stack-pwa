@@ -20,7 +20,9 @@ This is a mobile-first, installable PWA (React 19 + TypeScript + Vite + Tailwind
 - `src/lib/db.ts` — Dexie database (`players`, `games`, `settings` tables). `settings` is a simple key/value table (currently `courtCount`, `seasonStartedAt`).
 - `src/store/useAppStore.ts` — the single Zustand store; owns all app state (`players`, `games`, `courtCount`, `seasonStartedAt`) and every mutation, each of which writes to Dexie and then updates in-memory state. Components read state via `useAppStore((s) => s.foo)` and never talk to Dexie directly.
   - **Important Zustand gotcha**: selectors must return a stable reference (a field, or a `useMemo`'d derivation) — an inline `.filter()`/`.map()` inside a selector returns a new array every render and can cause infinite render loops.
-- `src/types/models.ts` — core domain types: `Player`, `Game` (has `status: 'setup' | 'live' | 'finished'`, per-team scores/history, optional `court` number), `TeamAssignment`, `StackingConfig`, `PlayerStats`.
+- `src/types/models.ts` — core domain types: `Player`, `Game` (has `status: 'setup' | 'live' | 'finished'`, per-team scores/history, optional `court` number, optional `serve`), `TeamAssignment`, `StackingConfig`, `PlayerStats`, `ServeState`.
+  - `serve` (`{ team, server: 1 | 2 }`) is the single source of truth for who is serving; read it through `serveOf(game)` in the store, which defaults games saved before serve tracking to `{ team: 'A', server: 2 }` (the 0-0-2 start). `Scoreboard` owns the controls (`setServe`, `sideOut`) and `CourtVisualizer` only reads it — it must not keep a local copy that can disagree with the scoreboard.
+  - `cancelGame` **deletes** the game row instead of marking it. That is the point of cancelling: a kept row would still spend court time and a pairing in the ledger. `finishGame` is the one that records a result.
 - `src/lib/stats.ts` — derives `PlayerStats` (games played, court time, wins/losses, partner counts) from `players` + `games`. `sessionGames(games, seasonStartedAt)` filters games down to the current "standings session" (everything since the last reset, plus any still-live game) — this is what powers the "fresh standings for a new day" behavior, and both `NextRoundPanel` and `History` must feed it (not raw `games`) into `computeStats`.
 - `src/lib/fairness.ts` — pure functions for picking who plays next (`pickNextPlayers`, ranked by fewest games/court time/oldest last-played) and generating team splits that minimize repeat pairings (`rankedTeamSplits`, honoring optional locked-together pairs).
 - `src/lib/stacking.ts` — computes on-court positions (`courtPositionsForScore`) from side preferences (`ad`/`deuce`/`flexible`) and the current score, used for doubles "stacking" strategy.
@@ -33,6 +35,10 @@ Games are not tied to a single "current game" — any number of games can have `
 ### UI structure
 
 `App.tsx` is a single-page app with bottom-tab navigation (`players` / `teams` / `game` / `history`, no router) rendering one top-level component per tab from `src/components/`. The Game tab renders one `Scoreboard` per currently-live game (stacked, labeled by court when there's more than one).
+
+The shell is a full-height flex column: fixed header, `flex-1 min-h-0 overflow-y-auto` main, and the nav **in normal flow** at the end. Do not make the nav `position: fixed` again — installed as a PWA it then anchors to a viewport taller than the area the app occupies and floats above a blank strip. For the same reason `html/body/#root` take `100dvh` (with a `100%` fallback) rather than `100%` alone.
+
+`History` shows two lists that answer different questions and are ordered oppositely on purpose: **Court time** ascending (who is owed a game, the app's core job) and **Standings** descending by wins (who is winning). Standings lists only players with a finished game — 0-0 rows bury the result — and shares a place between identical records rather than inventing an order from tiebreakers.
 
 ### Theming and design system
 

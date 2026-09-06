@@ -51,13 +51,19 @@ export function useTheme() {
 
   const setTheme = useCallback((next: ThemeMode) => {
     setMode(next)
-    applyTheme(next)
     try {
       localStorage.setItem(STORAGE_KEY, next)
     } catch {
       // Preference just won't survive a reload; the current session still honors it.
     }
   }, [])
+
+  // Applying on mount, not just on change: the pre-paint script pins the attribute but
+  // the chrome color has to be re-resolved once React owns the document, or an
+  // OS-following install keeps whatever color the markup shipped with.
+  useEffect(() => {
+    applyTheme(mode)
+  }, [mode])
 
   // While on `system`, follow the OS if it flips (sunset, scheduled dark mode).
   useEffect(() => {

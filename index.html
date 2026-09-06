@@ -24,11 +24,13 @@
     <script>
       try {
         var t = localStorage.getItem('stacking:theme')
-        if (t === 'light' || t === 'dark') {
-          document.documentElement.dataset.theme = t
-          var m = document.querySelector('meta[name="theme-color"]')
-          if (m) m.setAttribute('content', t === 'dark' ? '#101214' : '#f6f5f3')
-        }
+        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+        // The chrome color has to be resolved even on `system`, otherwise an install
+        // that follows the OS keeps the static color and paints a mismatched bar
+        // above and below the app.
+        var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        var m = document.querySelector('meta[name="theme-color"]')
+        if (m) m.setAttribute('content', dark ? '#101214' : '#f6f5f3')
       } catch (e) {}
     </script>
     <script type="module" src="/src/main.tsx"></script>

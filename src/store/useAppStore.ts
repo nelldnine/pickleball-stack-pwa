@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { db } from '../lib/db'
-import type { Game, Player, TeamAssignment } from '../types/models'
+import type { Game, Player, ServeState, TeamAssignment } from '../types/models'
 
 const MAX_COURTS = 6
 
@@ -27,7 +27,10 @@ interface AppState {
   ) => Promise<string>
   addPoint: (gameId: string, team: 'A' | 'B') => Promise<void>
   undoLastPoint: (gameId: string) => Promise<void>
+  setServe: (gameId: string, serve: ServeState) => Promise<void>
+  sideOut: (gameId: string) => Promise<void>
   finishGame: (gameId: string) => Promise<void>
+  cancelGame: (gameId: string) => Promise<void>
 
   resetStandings: () => Promise<void>
   clearHistory: () => Promise<void>
@@ -42,6 +45,11 @@ interface AppState {
 
 function uid() {
   return crypto.randomUUID()
+}
+
+/** Serve for a game, defaulting games recorded before serve tracking to team A's 2nd server. */
+export function serveOf(game: Game): ServeState {
+  return game.serve ?? { team: 'A', server: 2 }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -109,6 +117,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       history: [],
       status: 'live',
       court,
+      // 0-0-2: the side that serves first in a doubles game only gets one server
+      // before the first side out, so it opens on the 2nd server.
+      serve: { team: 'A', server: 2 },
     }
     await db.games.add(game)
     set({ games: [...get().games, game] })
@@ -142,12 +153,48 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })
   },
 
+  setServe: async (gameId, serve) => {
+    const game = get().games.find((g) => g.id === gameId)
+    if (!game) return
+    const updated: Game = { ...game, serve }
+    await db.games.put(updated)
+    set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })
+  },
+
+  /**
+   * Advances the serve one step through the doubles sequence: 1st server loses the
+   * rally and it passes to their partner, 2nd server loses it and the whole side is
+   * out, so the other team starts on their 1st server.
+   */
+  sideOut: async (gameId) => {
+    const game = get().games.find((g) => g.id === gameId)
+    if (!game) return
+    const current = serveOf(game)
+    const serve: ServeState =
+      current.server === 1
+        ? { team: current.team, server: 2 }
+        : { team: current.team === 'A' ? 'B' : 'A', server: 1 }
+    const updated: Game = { ...game, serve }
+    await db.games.put(updated)
+    set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })
+  },
+
   finishGame: async (gameId) => {
     const game = get().games.find((g) => g.id === gameId)
     if (!game) return
     const updated: Game = { ...game, status: 'finished', finishedAt: Date.now() }
     await db.games.put(updated)
     set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })
+  },
+
+  /**
+   * A cancelled game is deleted outright rather than kept with a status, because the
+   * point of cancelling is that it never happened: leaving a row behind would still
+   * hand its players court time and a pairing in the ledger.
+   */
+  cancelGame: async (gameId) => {
+    await db.games.delete(gameId)
+    set({ games: get().games.filter((g) => g.id !== gameId) })
   },
 
   resetStandings: async () => {
