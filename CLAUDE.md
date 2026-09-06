@@ -77,6 +77,8 @@ Design decisions worth preserving (they were deliberate, and each removed noise)
 
 - The roster shows handedness **only when it's left**. Right-handed is the default; printing it on every row is noise, and only the exception changes stacking.
 - The "most owed" badge on the Next Round matchup appears **only when it distinguishes someone**. If all four picked players are level it is suppressed — the same badge on every row explains nothing.
+- The serve strip lives **inside** the score card, on its bottom edge, not in a card of its own — on a phone a separate panel read as a second screen to consult mid-rally. It is one row: the two partners by name, the call, side out.
+- The server is identified by **name**, not "1st/2nd server" — bold in the team label above, filled in the strip below. A name is what gets said on court, and it let the old two-line panel (which repeated the pair name already printed on the score) collapse to one. The 1st/2nd number is still readable as the last digit of the call, and resolves to a player the same way `CourtVisualizer` resolves it, so the two can't disagree.
 - The ledger sorts **ascending** (least court time first), so the top of the list answers "who's up next".
 - The header is a session status strip (live courts / free players), not a repeated app title.
 
