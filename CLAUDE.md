@@ -38,7 +38,13 @@ Games are not tied to a single "current game" — any number of games can have `
 
 The shell is a full-height flex column: fixed header, `flex-1 min-h-0 overflow-y-auto` main, and the nav **in normal flow** at the end of the column, padded by `env(safe-area-inset-bottom)`. `#root` is `position: fixed; inset: 0` so a scrolling Safari toolbar can't resize the box under the nav.
 
-The nav reaching the physical bottom of an installed app depends on **`apple-mobile-web-app-status-bar-style: default`** in `index.html`, and nothing in the CSS. Under `black-translucent` WebKit moves the content origin up under the status bar without growing the layout viewport, so the whole page comes up short by exactly the status-bar inset (59pt on a Pro Max) and the nav sits above a dead strip of that height. `100dvh`, `100%`, and `position: fixed` all measure that same short viewport, so all three "fixes" leave the strip — the meta tag is the only lever. Under `default`, iOS paints the status bar itself from `meta[name=theme-color]`, which `theme.ts` keeps in sync with the palette, and `env(safe-area-inset-top)` is 0 (the header's `max(0.7rem, …)` covers that).
+The nav reaching the physical bottom of an installed iOS app rests on one rule in `src/index.css`: **`html { height: calc(100% + env(safe-area-inset-top)) }`** under `@media (display-mode: standalone)`. `apple-mobile-web-app-status-bar-style: black-translucent` extends the document up under the status bar but WebKit does not grow the layout viewport to match, so the page is short by exactly the top inset (59pt on a Pro Max) and the nav floats above a dead strip of that height. Adding the inset back to the document height is the fix; `100dvh`, `100%`, and `position: fixed` all report that same short viewport, so none of them can see the problem, let alone solve it.
+
+Consequences worth knowing before editing any of it:
+
+- **`#root` must not be `position: fixed`.** A fixed box lays out against the short viewport and re-creates the gap. It is `height: 100%` of the corrected document.
+- **Do not "simplify" the status bar meta to `default`.** iOS ignores the manifest's `theme_color` and offers only white / black / black-translucent here, so `default` buys an opaque *white* bar — wrong above the dark theme — and gives up edge-to-edge.
+- `html` is painted `surface` rather than `paper` so that any strip the document fails to cover reads as part of the nav. That is a backstop, not the fix.
 
 `History` shows two lists that answer different questions and are ordered oppositely on purpose: **Court time** ascending (who is owed a game, the app's core job) and **Standings** descending by wins (who is winning). Standings lists only players with a finished game — 0-0 rows bury the result — and shares a place between identical records rather than inventing an order from tiebreakers.
 
@@ -73,6 +79,14 @@ Design decisions worth preserving (they were deliberate, and each removed noise)
 - The "most owed" badge on the Next Round matchup appears **only when it distinguishes someone**. If all four picked players are level it is suppressed — the same badge on every row explains nothing.
 - The ledger sorts **ascending** (least court time first), so the top of the list answers "who's up next".
 - The header is a session status strip (live courts / free players), not a repeated app title.
+
+### App updates
+
+`registerType` is **`prompt`**, not `autoUpdate`, and `src/lib/pwaUpdate.ts` owns the registration (`injectRegister: null`). A silent reload would pull the scoreboard away mid-game, so a waiting build surfaces as a banner above the nav plus an "App" section in `History`; `App.tsx` holds the hook and passes both down, because calling `useAppUpdate` twice would register the worker twice.
+
+An installed iOS app is resumed from a frozen process and can go days without a page load, which is the only thing that triggers the default update check — that is what used to make a stale install look unfixable without deleting it. So the hook re-checks on an hourly timer, on every return to the foreground, and on demand.
+
+The reload after skip-waiting is deliberately ours. `registerSW`'s built-in reload runs only when the `controlling` event reports `isUpdate`, which requires the page to have already been under a worker's control; on the first run after registering it is false, and the button would swap the build in invisibly and look broken. The hook reloads on `controllerchange` and falls back to a timer for the uncontrolled case.
 
 ### Backup / portability
 

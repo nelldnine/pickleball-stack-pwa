@@ -13,14 +13,12 @@
       rel="stylesheet"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <!-- `default`, not `black-translucent`. Translucent moves the content origin up under the
-         status bar but does NOT grow the layout viewport to match, so an installed iOS app is
-         short by exactly the status-bar inset (59pt on a Pro Max) and parks the bottom nav above
-         a dead strip. Nothing measured in CSS can recover it — 100dvh, 100%, and `position: fixed`
-         all report the same short viewport. With `default` iOS owns the status bar and paints it
-         with `meta[name=theme-color]`, which theme.ts keeps pinned to the current palette, so the
-         bar still matches `paper`/dark and the app really does reach the bottom edge. -->
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <!-- iOS ignores the manifest's theme_color and offers only white / black / black-translucent
+         here, so `black-translucent` is the only way to get an edge-to-edge app (and the only one
+         that doesn't put a white bar above a dark theme). Its cost is a WebKit quirk: the document
+         is extended up under the status bar but the layout viewport is NOT grown to match, so the
+         page ends up short by exactly env(safe-area-inset-top). src/index.css adds that back. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Doubles team stacking, fair player rotation, and scorekeeping for pickleball." />
     <title>Pickleball Stacking</title>
   </head>

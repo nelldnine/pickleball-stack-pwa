@@ -2,8 +2,19 @@ import { useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { computeStats, sessionGames } from '../lib/stats'
 import { NextRoundPanel } from './NextRoundPanel'
+import type { UpdateStatus } from '../lib/pwaUpdate'
 
-export function History({ onGameStarted }: { onGameStarted: (gameId: string) => void }) {
+export function History({
+  onGameStarted,
+  updateStatus,
+  onCheckUpdates,
+  onUpdate,
+}: {
+  onGameStarted: (gameId: string) => void
+  updateStatus: UpdateStatus
+  onCheckUpdates: () => void
+  onUpdate: () => void
+}) {
   const players = useAppStore((s) => s.players)
   const games = useAppStore((s) => s.games)
   const seasonStartedAt = useAppStore((s) => s.seasonStartedAt)
@@ -298,8 +309,32 @@ export function History({ onGameStarted }: { onGameStarted: (gameId: string) => 
           </button>
         )}
       </div>
+
+      <div>
+        <h2 className="readout text-xl font-semibold mb-3">App</h2>
+        <button
+          type="button"
+          onClick={updateStatus === 'ready' ? onUpdate : onCheckUpdates}
+          disabled={updateStatus === 'checking'}
+          className="min-h-11 w-full rounded-xl border border-line bg-surface px-4 text-sm font-medium disabled:text-muted"
+        >
+          {UPDATE_LABEL[updateStatus]}
+        </button>
+        <p className="mt-2 text-sm text-muted">
+          {updateStatus === 'ready'
+            ? 'Installing takes a second and reloads the app. Scores are saved.'
+            : 'Checks the server for a newer build — no need to delete and re-add the app.'}
+        </p>
+      </div>
     </section>
   )
+}
+
+const UPDATE_LABEL: Record<UpdateStatus, string> = {
+  idle: 'Check for updates',
+  checking: 'Checking\u2026',
+  current: 'You\u2019re up to date \u2014 check again',
+  ready: 'Install new version',
 }
 
 function ResultRow({ names, score, won }: { names: string; score: number; won: boolean }) {

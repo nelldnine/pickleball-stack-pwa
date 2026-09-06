@@ -5,6 +5,7 @@ import { NextRoundPanel } from './components/NextRoundPanel'
 import { Scoreboard } from './components/Scoreboard'
 import { History } from './components/History'
 import { useTheme, type ThemeMode } from './lib/theme'
+import { useAppUpdate } from './lib/pwaUpdate'
 
 type Tab = 'players' | 'teams' | 'game' | 'history'
 
@@ -16,6 +17,10 @@ function App() {
   const courtCount = useAppStore((s) => s.courtCount)
 
   const [tab, setTab] = useState<Tab>('players')
+  const { status: updateStatus, checkNow, update } = useAppUpdate()
+  // Dismissal is per-waiting-build, not persisted: "later" during a game shouldn't mean
+  // "never", and the banner is cheap to show again after the next foreground check.
+  const [updateDismissed, setUpdateDismissed] = useState(false)
 
   const liveGames = useMemo(
     () => [...games].filter((g) => g.status === 'live').sort((a, b) => (a.court ?? 1) - (b.court ?? 1)),
@@ -83,12 +88,42 @@ function App() {
           ) : (
             <EmptyGame onGoToNext={() => setTab('teams')} />
           ))}
-        {tab === 'history' && <History onGameStarted={() => setTab('game')} />}
+        {tab === 'history' && (
+          <History
+            onGameStarted={() => setTab('game')}
+            updateStatus={updateStatus}
+            onCheckUpdates={checkNow}
+            onUpdate={update}
+          />
+        )}
       </main>
 
-      {/* In normal flow at the end of a full-height flex column rather than `fixed`:
-          a fixed bar is positioned against a viewport that installed PWAs measure
-          differently, which is what left it floating above a blank strip. */}
+      {/* Ink, not flare: flare means "a game is live / do this next on court". An update
+          is app chrome, and borrowing the live color for it would dilute the one place
+          that color has to be unmissable. */}
+      {updateStatus === 'ready' && !updateDismissed && (
+        <div className="shrink-0 flex items-center gap-2 border-t border-line bg-ink px-5 py-2 text-paper">
+          <p className="flex-1 text-sm">New version ready</p>
+          <button
+            type="button"
+            onClick={() => setUpdateDismissed(true)}
+            className="min-h-11 px-2 text-sm text-paper/65"
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            onClick={update}
+            className="min-h-11 rounded-full bg-paper px-4 text-sm font-medium text-ink"
+          >
+            Update
+          </button>
+        </div>
+      )}
+
+      {/* In normal flow at the end of the flex column, padded for the home indicator.
+          What keeps it on the physical bottom edge of an installed app is the document
+          height correction in index.css — see the note there before changing either. */}
       <nav
         aria-label="Sections"
         className="shrink-0 grid grid-cols-4 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)]"

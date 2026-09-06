@@ -9,7 +9,11 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // `prompt`, not `autoUpdate`: the app is used mid-game and a silent reload would
+      // pull the scoreboard out from under whoever is keeping score. src/lib/pwaUpdate.ts
+      // owns the registration and surfaces the waiting build as a banner instead.
+      registerType: 'prompt',
+      injectRegister: null,
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
         name: 'Pickleball Stacking',

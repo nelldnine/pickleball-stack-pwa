@@ -55,16 +55,37 @@ body {
 }
 
 /*
- * Pinned to the viewport rather than sized in percentages or viewport units, so a
- * scrolling toolbar in mobile Safari can never resize the app box under the nav.
- *
- * This is NOT what keeps an installed app off the bottom edge — a short viewport reads
- * short however you measure it. That was `apple-mobile-web-app-status-bar-style`; see
- * the note on the meta tag in index.html before touching either.
+ * Installed on iOS, `black-translucent` (see index.html) extends the document up under the
+ * status bar but WebKit does not grow the layout viewport to match, so every way of asking
+ * "how tall is the screen" — 100%, 100dvh, `position: fixed` — comes back short by exactly
+ * env(safe-area-inset-top), and the bottom nav parks above a dead strip of that height.
+ * Adding the inset back to the document height is the documented fix. Outside an install the
+ * env() is 0, so the calc collapses to plain 100%; the media query keeps it that way for any
+ * browser that reports a top inset without also shortening the viewport.
+ */
+@media (display-mode: standalone) {
+  html {
+    height: calc(100% + env(safe-area-inset-top));
+  }
+}
+
+/*
+ * Belt and braces on the above: the canvas color is what iOS paints into any strip the
+ * document fails to cover (that is why the strip in the original bug report came out `paper`
+ * rather than the manifest's background_color). Matching it to the nav means the worst case
+ * is a nav bar that looks tall, not one that floats above a gap.
+ */
+html {
+  background: var(--color-surface);
+}
+
+/*
+ * Fills the document box, which the rule above has already corrected. Deliberately NOT
+ * `position: fixed`: a fixed box is laid out against the short viewport, so it would
+ * re-introduce the very gap the calc removes.
  */
 #root {
-  position: fixed;
-  inset: 0;
+  height: 100%;
 }
 
 body {
