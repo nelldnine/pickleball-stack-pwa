@@ -15,8 +15,12 @@ export default defineConfig({
         name: 'Pickleball Stacking',
         short_name: 'Stacking',
         description: 'Doubles team stacking, fair rotation, and scorekeeping for pickleball.',
-        theme_color: '#131315',
-        background_color: '#131315',
+        // Now that iOS draws its own status bar (see index.html), these are real chrome
+        // colors, not placeholders: `paper`, so the install's system bars and launch
+        // splash match the app instead of flashing a near-black that is in neither theme.
+        // theme.ts repaints meta[name=theme-color] per theme once the app is running.
+        theme_color: '#f6f5f3',
+        background_color: '#f6f5f3',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',

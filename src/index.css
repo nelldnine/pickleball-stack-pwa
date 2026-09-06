@@ -55,12 +55,12 @@ body {
 }
 
 /*
- * The app box is pinned to the initial containing block rather than sized as a
- * percentage or in viewport units. Installed on iOS, `height: 100%` resolves against a
- * viewport that stops short of the home-indicator inset: the bottom nav parks above a
- * dead strip, and then its own safe-area padding gets added inside that already-raised
- * bar. `position: fixed` measures the box `viewport-fit=cover` really covers — the whole
- * screen — so the nav sits on the physical bottom edge and its padding does the lifting.
+ * Pinned to the viewport rather than sized in percentages or viewport units, so a
+ * scrolling toolbar in mobile Safari can never resize the app box under the nav.
+ *
+ * This is NOT what keeps an installed app off the bottom edge — a short viewport reads
+ * short however you measure it. That was `apple-mobile-web-app-status-bar-style`; see
+ * the note on the meta tag in index.html before touching either.
  */
 #root {
   position: fixed;
