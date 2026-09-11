@@ -6,11 +6,13 @@ import type { UpdateStatus } from '../lib/pwaUpdate'
 
 export function History({
   onGameStarted,
+  onShowStandings,
   updateStatus,
   onCheckUpdates,
   onUpdate,
 }: {
   onGameStarted: (gameId: string) => void
+  onShowStandings: () => void
   updateStatus: UpdateStatus
   onCheckUpdates: () => void
   onUpdate: () => void
@@ -48,40 +50,11 @@ export function History({
         minutes: Math.round((stats[p.id]?.courtTimeMs ?? 0) / 60000),
       }))
       // Least court time first: the top of this list is the answer to "who's owed a game".
+      // "Who's winning" is the opposite order and lives on the Standings screen.
       .sort((a, b) => a.games - b.games || a.minutes - b.minutes)
     const maxGames = Math.max(1, ...rows.map((r) => r.games))
     const avgGames = rows.length ? rows.reduce((sum, r) => sum + r.games, 0) / rows.length : 0
     return { rows, maxGames, avgGames }
-  }, [players, stats])
-
-  // Court time answers "who's owed a game"; this answers "who's winning". Separate
-  // question, separate list — and only players who have actually finished a game,
-  // since a leaderboard padded with 0-0 rows buries the result it exists to show.
-  const standings = useMemo(() => {
-    const rows = players
-      .map((p) => ({
-        id: p.id,
-        name: p.name,
-        wins: stats[p.id]?.wins ?? 0,
-        losses: stats[p.id]?.losses ?? 0,
-      }))
-      .filter((r) => r.wins + r.losses > 0)
-      .sort((a, b) => {
-        if (a.wins !== b.wins) return b.wins - a.wins
-        // Same wins: fewer losses is the better record.
-        if (a.losses !== b.losses) return a.losses - b.losses
-        return a.name.localeCompare(b.name)
-      })
-    const maxWins = Math.max(1, ...rows.map((r) => r.wins))
-    // Competition ranking: an identical record shares a place rather than inventing
-    // an order out of the tiebreakers.
-    const ranked: (typeof rows[number] & { place: number; pct: number })[] = []
-    rows.forEach((r, i) => {
-      const prev = rows[i - 1]
-      const tied = prev && prev.wins === r.wins && prev.losses === r.losses
-      ranked.push({ ...r, place: tied ? ranked[i - 1].place : i + 1, pct: (r.wins / maxWins) * 100 })
-    })
-    return ranked
   }, [players, stats])
 
   const [importMessage, setImportMessage] = useState<string | null>(null)
@@ -201,44 +174,31 @@ export function History({
       </div>
 
       <div>
-        <h2 className="readout text-xl font-semibold mb-3">Standings</h2>
-        {standings.length === 0 ? (
-          <p className="text-sm text-muted">Finish a game to start the win column.</p>
-        ) : (
-          <ol className="flex flex-col gap-3">
-            {standings.map((r) => {
-              const leading = r.place === 1
-              return (
-                <li key={r.id}>
-                  <div className="flex items-baseline gap-2.5 mb-1.5">
-                    <span
-                      className={`readout text-xs w-4 shrink-0 ${leading ? 'text-court font-semibold' : 'text-faint'}`}
-                    >
-                      {r.place}
-                    </span>
-                    <span className={`text-sm truncate flex-1 ${leading ? 'font-semibold text-ink' : 'text-muted'}`}>
-                      {r.name}
-                    </span>
-                    <span className="readout text-xs shrink-0">
-                      <span className={leading ? 'text-ink font-semibold' : 'text-ink'}>{r.wins}</span>
-                      <span className="text-faint">–{r.losses}</span>
-                    </span>
-                  </div>
-                  <div className="ml-6.5 h-2 rounded-full bg-sunken">
-                    <div
-                      className={`h-full rounded-full ${leading ? 'bg-court' : 'bg-court/55'}`}
-                      style={{ width: `${r.pct}%` }}
-                    />
-                  </div>
-                </li>
-              )
-            })}
-          </ol>
-        )}
-      </div>
-
-      <div>
-        <h2 className="readout text-xl font-semibold mb-3">Results</h2>
+        <div className="flex items-baseline justify-between gap-3 mb-3">
+          <h2 className="readout text-xl font-semibold">Results</h2>
+          {/* Shown even with no games yet: hiding the only way in would make the
+              screen undiscoverable, which is not the same as a badge that says nothing. */}
+          <button
+            type="button"
+            onClick={onShowStandings}
+            className="label text-[0.6rem] text-muted flex items-center gap-1"
+          >
+            Standings
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
         {finished.length === 0 && <p className="text-sm text-muted">No finished games yet.</p>}
         <ul className="flex flex-col">
           {finished.map((g) => {

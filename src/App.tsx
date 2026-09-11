@@ -4,10 +4,11 @@ import { PlayerRoster } from './components/PlayerRoster'
 import { NextRoundPanel } from './components/NextRoundPanel'
 import { Scoreboard } from './components/Scoreboard'
 import { History } from './components/History'
+import { Standings } from './components/Standings'
 import { useTheme, type ThemeMode } from './lib/theme'
 import { useAppUpdate } from './lib/pwaUpdate'
 
-type Tab = 'players' | 'teams' | 'game' | 'history'
+type Tab = 'players' | 'teams' | 'game' | 'standings' | 'history'
 
 function App() {
   const load = useAppStore((s) => s.load)
@@ -88,9 +89,11 @@ function App() {
           ) : (
             <EmptyGame onGoToNext={() => setTab('teams')} />
           ))}
+        {tab === 'standings' && <Standings onBack={() => setTab('history')} />}
         {tab === 'history' && (
           <History
             onGameStarted={() => setTab('game')}
+            onShowStandings={() => setTab('standings')}
             updateStatus={updateStatus}
             onCheckUpdates={checkNow}
             onUpdate={update}
@@ -137,7 +140,14 @@ function App() {
           onClick={() => setTab('game')}
           live={liveGames.length > 0}
         />
-        <TabButton label="Ledger" icon={<IconLedger />} active={tab === 'history'} onClick={() => setTab('history')} />
+        {/* Standings is reached from the Results section, not the nav — so the Ledger tab
+            stays lit while you're on it, and tapping it again comes back. */}
+        <TabButton
+          label="Ledger"
+          icon={<IconLedger />}
+          active={tab === 'history' || tab === 'standings'}
+          onClick={() => setTab('history')}
+        />
       </nav>
     </div>
   )

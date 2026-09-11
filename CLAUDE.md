@@ -24,7 +24,11 @@ This is a mobile-first, installable PWA (React 19 + TypeScript + Vite + Tailwind
   - `serve` (`{ team, server: 1 | 2 }`) is the single source of truth for who is serving; read it through `serveOf(game)` in the store, which defaults games saved before serve tracking to `{ team: 'A', server: 2 }` (the 0-0-2 start). `Scoreboard` owns the controls (`setServe`, `sideOut`) and `CourtVisualizer` only reads it — it must not keep a local copy that can disagree with the scoreboard.
   - `cancelGame` **deletes** the game row instead of marking it. That is the point of cancelling: a kept row would still spend court time and a pairing in the ledger. `finishGame` is the one that records a result.
 - `src/lib/stats.ts` — derives `PlayerStats` (games played, court time, wins/losses, partner counts) from `players` + `games`. `sessionGames(games, seasonStartedAt)` filters games down to the current "standings session" (everything since the last reset, plus any still-live game) — this is what powers the "fresh standings for a new day" behavior, and both `NextRoundPanel` and `History` must feed it (not raw `games`) into `computeStats`.
-- `src/lib/fairness.ts` — pure functions for picking who plays next (`pickNextPlayers`, ranked by fewest games/court time/oldest last-played) and generating team splits that minimize repeat pairings (`rankedTeamSplits`, honoring optional locked-together pairs).
+- `src/lib/fairness.ts` — pure functions for picking who plays next (`pickNextPlayers`, ranked by fewest games/court time/oldest last-played) and splitting those four into teams (honoring optional locked-together pairs). Two split modes, chosen in `NextRoundPanel` and dispatched by `teamSplitsFor`:
+  - `fair` (`rankedTeamSplits`) — fewest repeat pairings first, so everyone partners with everyone.
+  - `record` (`stackedTeamSplits`) — strongest with strongest by win/loss differential, ordered most-stacked to most-balanced so "try another pairing" walks the match back toward even. Four level players tie on every split, and the repeat-pairing score breaks it — a session with no finished games splits exactly like `fair` rather than inventing a hierarchy.
+  - The mode governs only the **split**. Who plays next is always the court-time ranking: letting records decide that would hand the winners more court time, which inverts the app's core job.
+  - `rankByFairness` ends in a **seeded hash tiebreak** (`shuffleKey`). Before anyone has played, every player is level on all three factors, and a stable sort would deal the roster in storage order — so the app would pick the top four of the Players tab at the start of every session, which reads as favoritism. It is a hash, not `Math.random()`, so the suggestion holds still across the re-renders that every scored point causes; and the seed is `seasonStartedAt`, so resetting standings re-deals the order for the new day. The seed is mixed in **after** the FNV hash, through a finalizer with right-shifts: fed into FNV's initial state it survives as the same additive offset on every player and merely rotates the order instead of re-dealing it.
 - `src/lib/stacking.ts` — computes on-court positions (`courtPositionsForScore`) from side preferences (`ad`/`deuce`/`flexible`) and the current score, used for doubles "stacking" strategy.
 - `src/lib/speech.ts` — optional Web Speech API integration for hands-free scoring ("point a"/"point b"/"undo").
 
@@ -34,7 +38,7 @@ Games are not tied to a single "current game" — any number of games can have `
 
 ### UI structure
 
-`App.tsx` is a single-page app with bottom-tab navigation (`players` / `teams` / `game` / `history`, no router) rendering one top-level component per tab from `src/components/`. The Game tab renders one `Scoreboard` per currently-live game (stacked, labeled by court when there's more than one).
+`App.tsx` is a single-page app with bottom-tab navigation (`players` / `teams` / `game` / `history`, no router) rendering one top-level component per tab from `src/components/`. `standings` is a fifth `Tab` value with no nav button — a sub-screen of Ledger, opened from the Results heading and carrying its own back link, with the Ledger tab staying lit while you're on it. The Game tab renders one `Scoreboard` per currently-live game (stacked, labeled by court when there's more than one).
 
 The shell is a full-height flex column: fixed header, `flex-1 min-h-0 overflow-y-auto` main, and the nav **in normal flow** at the end of the column, padded by `env(safe-area-inset-bottom)`. `#root` is `position: fixed; inset: 0` so a scrolling Safari toolbar can't resize the box under the nav.
 
@@ -46,7 +50,11 @@ Consequences worth knowing before editing any of it:
 - **Do not "simplify" the status bar meta to `default`.** iOS ignores the manifest's `theme_color` and offers only white / black / black-translucent here, so `default` buys an opaque *white* bar — wrong above the dark theme — and gives up edge-to-edge.
 - `html` is painted `surface` rather than `paper` so that any strip the document fails to cover reads as part of the nav. That is a backstop, not the fix.
 
-`History` shows two lists that answer different questions and are ordered oppositely on purpose: **Court time** ascending (who is owed a game, the app's core job) and **Standings** descending by wins (who is winning). Standings lists only players with a finished game — 0-0 rows bury the result — and shares a place between identical records rather than inventing an order from tiebreakers.
+**Court time** (in `History`) and **Standings** (its own screen) answer different questions and are ordered oppositely on purpose: court time ascending — who is owed a game, the app's core job — and standings descending by wins. They are separate screens because stacked on one, the reversal reads as an inconsistency rather than a distinction. `Standings` lists only players with a finished game — 0-0 rows bury the result — and shares a place between identical records rather than inventing an order from tiebreakers.
+
+Standings hangs off **Results** rather than the nav: it is the tally of those games, so it is one level down from them, and the nav stays at four tabs. The link shows even with no finished games — hiding the only entrance would make the screen undiscoverable, which is not the same thing as suppressing a badge that says nothing.
+
+Both headers carry the same **Reset**, because one `resetStandings` clears both and each screen is somewhere a person would go looking for it. The confirm copy names both consequences.
 
 ### Theming and design system
 
