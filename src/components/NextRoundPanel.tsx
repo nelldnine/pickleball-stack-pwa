@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { computeStats, sessionGames } from '../lib/stats'
-import { pickNextPlayers, rankedTeamSplits } from '../lib/fairness'
+import { pickNextPlayers, teamSplitsFor, type PairingMode } from '../lib/fairness'
 import type { SidePreference } from '../types/models'
 
 export function NextRoundPanel({
@@ -44,12 +44,15 @@ export function NextRoundPanel({
   const relevantGames = useMemo(() => sessionGames(games, seasonStartedAt), [games, seasonStartedAt])
   const stats = useMemo(() => computeStats(players, relevantGames), [players, relevantGames])
 
+  // Seeded on the standings boundary so a level roster is dealt in a different order
+  // each new session, instead of always starting from the top of the Players tab.
   const suggestedFour = useMemo(
-    () => pickNextPlayers(activePlayers, stats, Math.min(4, activePlayers.length)),
-    [activePlayers, stats],
+    () => pickNextPlayers(activePlayers, stats, Math.min(4, activePlayers.length), seasonStartedAt ?? 0),
+    [activePlayers, stats, seasonStartedAt],
   )
 
   const [selected, setSelected] = useState<string[]>(suggestedFour)
+  const [pairingMode, setPairingMode] = useState<PairingMode>('fair')
   const [stackingEnabled, setStackingEnabled] = useState(false)
   const [sides, setSides] = useState<Record<string, SidePreference>>({})
   const [lockedTogether, setLockedTogether] = useState<string[]>([])
@@ -81,16 +84,16 @@ export function NextRoundPanel({
   const lockedKey = lockedTogether.join(',')
 
   const splits = useMemo(
-    () => (canPick ? rankedTeamSplits(selected, stats, lockedPairs) : []),
+    () => (canPick ? teamSplitsFor(pairingMode, selected, stats, lockedPairs) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canPick, selectedKey, lockedKey, stats],
+    [canPick, selectedKey, lockedKey, stats, pairingMode],
   )
 
   const teams = splits[splitIndex % Math.max(splits.length, 1)] ?? null
 
   useEffect(() => {
     setSplitIndex(0)
-  }, [selectedKey, lockedKey])
+  }, [selectedKey, lockedKey, pairingMode])
 
   const toggleSelected = (id: string) => {
     setSelected((cur) => {
@@ -132,9 +135,23 @@ export function NextRoundPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, stats])
 
-  const waitOf = (id: string): string | null => {
+  // Stacking by record can only mean something once somebody has a record. Until then
+  // every split is equally stacked, the repeat-pairing score picks one, and printing
+  // "0-0" four times would dress that up as a ranking it isn't.
+  const hasRecords = useMemo(
+    () => selected.some((id) => (stats[id]?.wins ?? 0) + (stats[id]?.losses ?? 0) > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedKey, stats],
+  )
+
+  const metaOf = (id: string): { text: string; accent: boolean } | null => {
+    if (pairingMode === 'record') {
+      if (!hasRecords) return null
+      const s = stats[id]
+      return { text: `${s?.wins ?? 0}-${s?.losses ?? 0}`, accent: false }
+    }
     if (!gamesSpread) return null
-    return (stats[id]?.gamesPlayed ?? 0) === gamesSpread.min ? 'most owed' : null
+    return (stats[id]?.gamesPlayed ?? 0) === gamesSpread.min ? { text: 'most owed', accent: true } : null
   }
 
   const noCourtsFree = courtCount > 0 && availableCourts.length === 0
@@ -193,11 +210,30 @@ export function NextRoundPanel({
         <>
           {teams && (
             <div className="flex flex-col gap-4">
+              <div className="flex rounded-lg border border-line bg-surface p-0.5" role="group" aria-label="How to split the teams">
+                {([
+                  ['fair', 'Fair rotation'],
+                  ['record', 'By record'],
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setPairingMode(mode)}
+                    aria-pressed={pairingMode === mode}
+                    className={`flex-1 min-h-9 rounded-md label text-[0.58rem] transition-colors ${
+                      pairingMode === mode ? 'bg-ink text-paper' : 'text-muted'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               {/* The matchup, not two unrelated cards: one panel split by a hairline
                   with the versus mark sitting on the seam. */}
               <div className="rounded-2xl border border-line bg-surface overflow-hidden">
                 <div className="relative grid grid-cols-2">
-                  <TeamColumn playerIds={teams.teamA} nameOf={nameOf} waitOf={waitOf} onSwap={swapPlayer} align="left" />
+                  <TeamColumn playerIds={teams.teamA} nameOf={nameOf} metaOf={metaOf} onSwap={swapPlayer} align="left" />
                   <span aria-hidden="true" className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 bg-line" />
                   <span
                     aria-hidden="true"
@@ -205,7 +241,7 @@ export function NextRoundPanel({
                   >
                     vs
                   </span>
-                  <TeamColumn playerIds={teams.teamB} nameOf={nameOf} waitOf={waitOf} onSwap={swapPlayer} align="right" />
+                  <TeamColumn playerIds={teams.teamB} nameOf={nameOf} metaOf={metaOf} onSwap={swapPlayer} align="right" />
                 </div>
                 <button
                   type="button"
@@ -218,7 +254,11 @@ export function NextRoundPanel({
               </div>
 
               <p className="text-xs text-muted -mt-1">
-                Picked to even out court time. Tap a name to move them across.
+                {pairingMode === 'record'
+                  ? hasRecords
+                    ? 'Still the four most owed court time, split strongest with strongest. Tap a name to move them across.'
+                    : 'No finished games yet, so this splits the same as fair rotation. Tap a name to move them across.'
+                  : 'Picked to even out court time. Tap a name to move them across.'}
               </p>
 
               <div>
@@ -359,20 +399,20 @@ function CourtCountStepper({ count, onChange }: { count: number; onChange: (n: n
 function TeamColumn({
   playerIds,
   nameOf,
-  waitOf,
+  metaOf,
   onSwap,
   align,
 }: {
   playerIds: [string, string]
   nameOf: (id: string) => string
-  waitOf: (id: string) => string | null
+  metaOf: (id: string) => { text: string; accent: boolean } | null
   onSwap: (id: string) => void
   align: 'left' | 'right'
 }) {
   return (
     <div className={`flex flex-col py-1 ${align === 'right' ? 'items-end text-right' : 'items-start text-left'}`}>
       {playerIds.map((id) => {
-        const wait = waitOf(id)
+        const meta = metaOf(id)
         return (
           <button
             key={id}
@@ -384,8 +424,13 @@ function TeamColumn({
             }`}
           >
             <span className="block truncate font-medium">{nameOf(id)}</span>
-            {/* Surfacing why the engine chose this player builds trust in the auto-pick. */}
-            {wait && <span className="label block text-[0.5rem] text-flare mt-0.5">{wait}</span>}
+            {/* Surfacing why the engine chose this player builds trust in the auto-pick.
+                Flare is reserved for "do this next", so a record reads as plain data. */}
+            {meta && (
+              <span className={`label block text-[0.5rem] mt-0.5 ${meta.accent ? 'text-flare' : 'text-muted'}`}>
+                {meta.text}
+              </span>
+            )}
           </button>
         )
       })}
