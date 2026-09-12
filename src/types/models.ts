@@ -34,6 +34,18 @@ export type PointEvent = {
 export interface ServeState {
   team: 'A' | 'B'
   server: 1 | 2
+  /**
+   * The player serving. The number can't name them on its own: the 1st server is
+   * whoever stands in the right-hand court when the side wins the serve, and partners
+   * swap courts on every point they score. Absent on games saved before this existed.
+   */
+  serverId?: string
+  /**
+   * Per team, the player in the right-hand court whenever that team's score is even.
+   * Partners only swap courts when they score, so this plus the score says where both
+   * players stand at any moment. Absent on games saved before this existed.
+   */
+  evenCourt?: { A: string; B: string }
 }
 
 export interface Game {

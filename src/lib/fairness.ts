@@ -1,13 +1,15 @@
-import type { Player, PlayerStats, TeamAssignment } from '../types/models'
+import type { Game, Player, PlayerStats, TeamAssignment } from '../types/models'
 
 /**
- * How the four picked players get divided into two teams.
- * - `fair`   — minimize repeat pairings, so everyone partners with everyone.
- * - `record` — stack strongest with strongest by win/loss record.
+ * How the next match is put together.
+ * - `fair`   — the four most owed court time, split to minimize repeat pairings, so
+ *              everyone partners with everyone.
+ * - `record` — win/lose stacking: once a pair has played, they stay a team, and teams
+ *              meet teams that had the same last result — winners play winners, losers
+ *              play losers.
  *
- * Note this only governs the *split*. Who plays next is always the court-time
- * ranking below: letting records decide that would hand the winners more court
- * time, which is the opposite of what the app is for.
+ * Neither mode lets results decide *how much* anyone plays. `record` only chooses among
+ * the teams that court time says are up, so winning never buys extra games.
  */
 export type PairingMode = 'fair' | 'record'
 
@@ -125,34 +127,133 @@ export function rankedTeamSplits(
 }
 
 /**
- * The same four players, split strongest-with-strongest instead — the open-play
- * "winners' court" idea, for a group that would rather play a stacked match than
- * a fresh pairing.
- *
- * Ordered from most stacked to most balanced, so "try another pairing" walks the
- * match back toward even. Strength is the plain win/loss differential, which means
- * four level players produce three equally-stacked splits and the repeat-pairing
- * score breaks the tie — a session with no finished games behaves exactly like
- * `fair` rather than inventing a hierarchy out of nothing.
+ * A pair who played together in both players' most recent finished game, and so are
+ * still a team under win/lose stacking.
  */
-export function stackedTeamSplits(
+export interface StandingTeam {
+  players: [string, string]
+  result: 'won' | 'lost'
+  /** The team they just played, so a same-result match can be preferred over a rematch. */
+  lastOpponents: [string, string]
+}
+
+/**
+ * Standing teams among `availableIds`, read from `games` (pass session games).
+ *
+ * A pair only counts when that game is the latest for *both* players — if either has
+ * since played with someone else, the team has dissolved. A drawn game has no result
+ * to stack on, so its pairs dissolve too, as does any pair whose partner is not free.
+ */
+export function standingTeams(games: Game[], availableIds: string[]): StandingTeam[] {
+  const available = new Set(availableIds)
+  const latest = new Map<string, Game>()
+  const finished = games
+    .filter((g) => g.status === 'finished')
+    .sort((a, b) => (b.finishedAt ?? b.createdAt) - (a.finishedAt ?? a.createdAt))
+  for (const g of finished) {
+    for (const id of g.playerIds) {
+      if (!latest.has(id)) latest.set(id, g)
+    }
+  }
+
+  const teams: StandingTeam[] = []
+  for (const g of new Set(latest.values())) {
+    if (g.scoreA === g.scoreB) continue
+    const sides = [
+      { players: g.teams.teamA, won: g.scoreA > g.scoreB, other: g.teams.teamB },
+      { players: g.teams.teamB, won: g.scoreB > g.scoreA, other: g.teams.teamA },
+    ]
+    for (const side of sides) {
+      const intact = side.players.every((id) => available.has(id) && latest.get(id) === g)
+      if (intact) {
+        teams.push({ players: side.players, result: side.won ? 'won' : 'lost', lastOpponents: side.other })
+      }
+    }
+  }
+  return teams
+}
+
+/**
+ * The next four under win/lose stacking, ordered team A then team B where both are
+ * standing teams.
+ *
+ * Court time still decides who is up: every team and leftover single is ranked by its
+ * players' place in the fairness order, and only units level with the most-owed one on
+ * games played are considered. Among those, the most-owed team meets a team with the
+ * same last result, then any team that isn't a rematch, then whoever is left. Seats a
+ * whole team can't fill go to singles, and only then does a team get broken up.
+ *
+ * With no standing teams yet — the first round of a session — this is exactly
+ * `pickNextPlayers`.
+ */
+export function pickNextByRecord(
+  players: Player[],
+  stats: Record<string, PlayerStats>,
+  teams: StandingTeam[],
+  seed = 0,
+): string[] {
+  const ranked = rankByFairness(players, stats, seed).map((e) => e.playerId)
+  if (ranked.length < 4 || teams.length === 0) return ranked.slice(0, 4)
+
+  const position = new Map(ranked.map((id, i) => [id, i]))
+  const onTeam = new Set(teams.flatMap((t) => t.players))
+  const mean = (ids: string[], f: (id: string) => number) => ids.reduce((sum, id) => sum + f(id), 0) / ids.length
+
+  const units = [
+    ...teams.map((team) => ({ ids: team.players as string[], team })),
+    ...ranked.filter((id) => !onTeam.has(id)).map((id) => ({ ids: [id], team: null as StandingTeam | null })),
+  ]
+    .map((u) => ({
+      ...u,
+      rank: mean(u.ids, (id) => position.get(id) ?? Infinity),
+      games: mean(u.ids, (id) => stats[id]?.gamesPlayed ?? 0),
+    }))
+    .sort((a, b) => a.rank - b.rank)
+
+  const [first, ...rest] = units
+  const tier = rest.filter((u) => u.games === first.games)
+
+  if (first.team) {
+    const lead = first.team
+    const isRematch = (t: StandingTeam) => t.players.every((id) => lead.lastOpponents.includes(id))
+    const tierTeams = tier.flatMap((u) => (u.team ? [u.team] : []))
+    const opponent =
+      tierTeams.find((t) => t.result === lead.result) ??
+      tierTeams.find((t) => !isRematch(t)) ??
+      tierTeams[0]
+    if (opponent) return [...lead.players, ...opponent.players]
+  }
+
+  const four = [...first.ids]
+  for (const u of tier) {
+    if (four.length + u.ids.length <= 4) four.push(...u.ids)
+  }
+  for (const id of ranked) {
+    if (four.length < 4 && !four.includes(id)) four.push(id)
+  }
+  return four
+}
+
+/**
+ * The four players' splits under win/lose stacking: standing teams kept intact first,
+ * then by fewest repeat pairings — so "try another pairing" still has somewhere to go,
+ * and four players with no standing team split exactly like `fair`.
+ */
+export function recordTeamSplits(
   fourPlayerIds: string[],
   stats: Record<string, PlayerStats>,
   lockedPairs: [string, string][] = [],
+  teams: StandingTeam[] = [],
 ): TeamAssignment[] {
+  const isTeam = (pair: [string, string]) =>
+    teams.some((t) => t.players.includes(pair[0]) && t.players.includes(pair[1]))
   return validSplits(fourPlayerIds, lockedPairs)
-    .map((split) => {
-      const strengthA = teamStrength(split.teamA, stats)
-      const strengthB = teamStrength(split.teamB, stats)
-      return {
-        // Put the stronger pair on team A so the left column of the matchup is
-        // always the favored side and the stacking is legible at a glance.
-        split: strengthB > strengthA ? { teamA: split.teamB, teamB: split.teamA } : split,
-        gap: Math.abs(strengthA - strengthB),
-        repeatScore: splitRepeatScore(split, stats),
-      }
-    })
-    .sort((a, b) => b.gap - a.gap || a.repeatScore - b.repeatScore)
+    .map((split) => ({
+      split,
+      intact: Number(isTeam(split.teamA)) + Number(isTeam(split.teamB)),
+      repeatScore: splitRepeatScore(split, stats),
+    }))
+    .sort((a, b) => b.intact - a.intact || a.repeatScore - b.repeatScore)
     .map((s) => s.split)
 }
 
@@ -162,9 +263,10 @@ export function teamSplitsFor(
   fourPlayerIds: string[],
   stats: Record<string, PlayerStats>,
   lockedPairs: [string, string][] = [],
+  teams: StandingTeam[] = [],
 ): TeamAssignment[] {
   return mode === 'record'
-    ? stackedTeamSplits(fourPlayerIds, stats, lockedPairs)
+    ? recordTeamSplits(fourPlayerIds, stats, lockedPairs, teams)
     : rankedTeamSplits(fourPlayerIds, stats, lockedPairs)
 }
 
@@ -212,14 +314,4 @@ function splitRepeatScore(split: TeamAssignment, stats: Record<string, PlayerSta
 function pairScore(pair: [string, string], stats: Record<string, PlayerStats>): number {
   const [x, y] = pair
   return stats[x]?.partnerCounts[y] ?? 0
-}
-
-/** Win/loss differential — 0 for a player with no finished games, so they sit between. */
-export function recordStrength(stats: Record<string, PlayerStats>, playerId: string): number {
-  const s = stats[playerId]
-  return (s?.wins ?? 0) - (s?.losses ?? 0)
-}
-
-function teamStrength(pair: [string, string], stats: Record<string, PlayerStats>): number {
-  return recordStrength(stats, pair[0]) + recordStrength(stats, pair[1])
 }

@@ -24,6 +24,7 @@ export function Scoreboard({
   const finishGame = useAppStore((s) => s.finishGame)
   const cancelGame = useAppStore((s) => s.cancelGame)
   const sideOut = useAppStore((s) => s.sideOut)
+  const switchServer = useAppStore((s) => s.switchServer)
 
   const [listening, setListening] = useState(false)
   const recognizerRef = useRef<ReturnType<typeof createScoreRecognizer>>(null)
@@ -83,9 +84,11 @@ export function Scoreboard({
   const leader = game.scoreA === game.scoreB ? null : game.scoreA > game.scoreB ? 'A' : 'B'
 
   const serve = serveOf(game)
-  // 1st/2nd server resolves to a specific player the same way CourtVisualizer resolves it,
-  // so the bold name on the score and the name on the court diagram can never disagree.
-  const servingIndex = serve.server - 1
+  // The server is a tracked player, not a position in the team list — the number and the
+  // name are both read off the same serve, and CourtVisualizer reads the same player, so
+  // the bold name, the call and the diagram can't disagree.
+  const servingPair = serve.team === 'A' ? game.teams.teamA : game.teams.teamB
+  const servingIndex = servingPair.indexOf(serve.serverId)
   // The doubles call: serving side's score, receiving side's score, server number.
   const call = `${serve.team === 'A' ? game.scoreA : game.scoreB}-${serve.team === 'A' ? game.scoreB : game.scoreA}-${serve.server}`
 
@@ -125,7 +128,12 @@ export function Scoreboard({
           />
         </div>
 
-        <ServeStrip call={call} onSideOut={() => sideOut(gameId)} />
+        <ServeStrip
+          call={call}
+          partnerName={nameOf(servingPair[1 - servingIndex])}
+          onSideOut={() => sideOut(gameId)}
+          onSwitchServer={() => switchServer(gameId)}
+        />
       </div>
 
       <div className="flex gap-2">
@@ -239,29 +247,50 @@ function TeamScoreButton({
 }
 
 /**
- * What is left of the serve panel once the score card says who is serving: the doubles
- * call, and the one button that moves the serve on. Everything else was a second way to
- * read something already on screen.
+ * The serve strip: the doubles call, the button that moves the serve on, and a quiet
+ * correction for when the app has the wrong partner serving.
  *
- * There is no 1st/2nd server picker any more. `sideOut` walks the serve through every
- * legal position it can be in — 1st server, 2nd server, then over to the other team — so
- * the only thing the picker did that this doesn't is jump straight to a state, which is
- * not worth a control on a card you look at between rallies.
+ * There is no 1st/2nd server picker. `sideOut` walks the serve through every legal
+ * position — 1st server, 2nd server, then over to the other team — and the number can
+ * never be wrong on its own. What can be wrong is the *name*: the app doesn't see who
+ * starts in which court, so "switch" says "it's the other one", once, and the app
+ * carries the correction forward.
  */
-function ServeStrip({ call, onSideOut }: { call: string; onSideOut: () => void }) {
+function ServeStrip({
+  call,
+  partnerName,
+  onSideOut,
+  onSwitchServer,
+}: {
+  call: string
+  partnerName: string
+  onSideOut: () => void
+  onSwitchServer: () => void
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-line px-3.5 py-2">
+    <div className="flex items-center justify-between gap-2 border-t border-line px-3.5 py-2">
       <p className="readout text-lg font-semibold tracking-tight" aria-label={`Call: ${call}`}>
         {call}
       </p>
-      <button
-        type="button"
-        onClick={onSideOut}
-        title="Serving team lost the rally"
-        className="min-h-11 shrink-0 rounded-lg border border-line bg-sunken px-4 label text-[0.55rem]"
-      >
-        Side out
-      </button>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onSwitchServer}
+          aria-label={`${partnerName} is serving instead`}
+          title="Wrong server? Switch to their partner"
+          className="min-h-11 shrink-0 px-3 label text-[0.55rem] text-muted active:text-ink transition-colors"
+        >
+          Switch
+        </button>
+        <button
+          type="button"
+          onClick={onSideOut}
+          title="Serving team lost the rally"
+          className="min-h-11 shrink-0 rounded-lg border border-line bg-sunken px-4 label text-[0.55rem]"
+        >
+          Side out
+        </button>
+      </div>
     </div>
   )
 }

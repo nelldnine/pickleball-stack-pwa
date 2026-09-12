@@ -29,6 +29,7 @@ interface AppState {
   undoLastPoint: (gameId: string) => Promise<void>
   setServe: (gameId: string, serve: ServeState) => Promise<void>
   sideOut: (gameId: string) => Promise<void>
+  switchServer: (gameId: string) => Promise<void>
   finishGame: (gameId: string) => Promise<void>
   cancelGame: (gameId: string) => Promise<void>
 
@@ -47,9 +48,43 @@ function uid() {
   return crypto.randomUUID()
 }
 
-/** Serve for a game, defaulting games recorded before serve tracking to team A's 2nd server. */
-export function serveOf(game: Game): ServeState {
-  return game.serve ?? { team: 'A', server: 2 }
+/** A serve with every field resolved. */
+export type ResolvedServe = Required<ServeState>
+
+/**
+ * Serve for a game, with defaults for games saved before each part was tracked: team A's
+ * 2nd server (the 0-0-2 start), the first-listed player of each team in the right-hand
+ * court, and — lacking a recorded server — the player the old index-based display named,
+ * so a game in progress across the update keeps showing who it showed.
+ */
+export function serveOf(game: Game): ResolvedServe {
+  const base = game.serve ?? { team: 'A', server: 2 }
+  const pair = base.team === 'A' ? game.teams.teamA : game.teams.teamB
+  return {
+    team: base.team,
+    server: base.server,
+    serverId: base.serverId && pair.includes(base.serverId) ? base.serverId : pair[base.server - 1],
+    evenCourt: base.evenCourt ?? { A: game.teams.teamA[0], B: game.teams.teamB[0] },
+  }
+}
+
+function partnerOf(pair: [string, string], id: string): string {
+  return pair[0] === id ? pair[1] : pair[0]
+}
+
+/** Who stands in `team`'s right-hand court at `score`: partners swap on every point scored. */
+function rightCourtPlayer(game: Game, team: 'A' | 'B', evenCourt: ResolvedServe['evenCourt'], score: number): string {
+  const pair = team === 'A' ? game.teams.teamA : game.teams.teamB
+  return score % 2 === 0 ? evenCourt[team] : partnerOf(pair, evenCourt[team])
+}
+
+/**
+ * Who starts in the right-hand court. A partner who stacks to the deuce side, or a
+ * first-listed player who stacks to the ad side, flips the default; otherwise it is the
+ * first-listed player, and `switchServer` corrects it on the court.
+ */
+function startingEvenCourt(pair: [string, string], sides: Record<string, Player['sidePreference']>): string {
+  return sides[pair[1]] === 'deuce' || sides[pair[0]] === 'ad' ? pair[1] : pair[0]
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -105,6 +140,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   startGame: async (teams, stackingEnabled, sides = {}, court = 1) => {
+    const stackedSides = stackingEnabled ? sides : {}
+    const evenCourt = {
+      A: startingEvenCourt(teams.teamA, stackedSides),
+      B: startingEvenCourt(teams.teamB, stackedSides),
+    }
     const game: Game = {
       id: uid(),
       createdAt: Date.now(),
@@ -118,8 +158,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       status: 'live',
       court,
       // 0-0-2: the side that serves first in a doubles game only gets one server
-      // before the first side out, so it opens on the 2nd server.
-      serve: { team: 'A', server: 2 },
+      // before the first side out, so it opens on the 2nd server — who is simply
+      // whoever starts in the right-hand court.
+      serve: { team: 'A', server: 2, serverId: evenCourt.A, evenCourt },
     }
     await db.games.add(game)
     set({ games: [...get().games, game] })
@@ -164,16 +205,46 @@ export const useAppStore = create<AppState>((set, get) => ({
   /**
    * Advances the serve one step through the doubles sequence: 1st server loses the
    * rally and it passes to their partner, 2nd server loses it and the whole side is
-   * out, so the other team starts on their 1st server.
+   * out, so the other team starts on their 1st server — whoever is standing in their
+   * right-hand court at their current score.
+   *
+   * Points don't touch the serve: a server who wins the rally keeps serving, from the
+   * other court, under the same number.
    */
   sideOut: async (gameId) => {
     const game = get().games.find((g) => g.id === gameId)
     if (!game) return
     const current = serveOf(game)
-    const serve: ServeState =
-      current.server === 1
-        ? { team: current.team, server: 2 }
-        : { team: current.team === 'A' ? 'B' : 'A', server: 1 }
+    let serve: ServeState
+    if (current.server === 1) {
+      const pair = current.team === 'A' ? game.teams.teamA : game.teams.teamB
+      serve = { ...current, server: 2, serverId: partnerOf(pair, current.serverId) }
+    } else {
+      const team = current.team === 'A' ? 'B' : 'A'
+      const score = team === 'A' ? game.scoreA : game.scoreB
+      serve = { ...current, team, server: 1, serverId: rightCourtPlayer(game, team, current.evenCourt, score) }
+    }
+    const updated: Game = { ...game, serve }
+    await db.games.put(updated)
+    set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })
+  },
+
+  /**
+   * "It's the other one serving." The app can't see who stood where, so this is the
+   * correction. The number stays — the call was right, only the name was wrong — and
+   * since a wrong server can only come from having the serving team's courts backwards,
+   * `evenCourt` flips with it, which keeps their next turn to serve right too.
+   */
+  switchServer: async (gameId) => {
+    const game = get().games.find((g) => g.id === gameId)
+    if (!game) return
+    const current = serveOf(game)
+    const pair = current.team === 'A' ? game.teams.teamA : game.teams.teamB
+    const serve: ServeState = {
+      ...current,
+      serverId: partnerOf(pair, current.serverId),
+      evenCourt: { ...current.evenCourt, [current.team]: partnerOf(pair, current.evenCourt[current.team]) },
+    }
     const updated: Game = { ...game, serve }
     await db.games.put(updated)
     set({ games: get().games.map((g) => (g.id === gameId ? updated : g)) })

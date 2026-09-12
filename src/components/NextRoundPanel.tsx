@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { computeStats, sessionGames } from '../lib/stats'
-import { pickNextPlayers, teamSplitsFor, type PairingMode } from '../lib/fairness'
+import { pickNextByRecord, pickNextPlayers, standingTeams, teamSplitsFor, type PairingMode } from '../lib/fairness'
 import type { SidePreference } from '../types/models'
 
 export function NextRoundPanel({
@@ -44,28 +44,42 @@ export function NextRoundPanel({
   const relevantGames = useMemo(() => sessionGames(games, seasonStartedAt), [games, seasonStartedAt])
   const stats = useMemo(() => computeStats(players, relevantGames), [players, relevantGames])
 
+  const [pairingMode, setPairingMode] = useState<PairingMode>('fair')
+
+  const activeIds = useMemo(() => activePlayers.map((p) => p.id), [activePlayers])
+  const teamsInPlay = useMemo(() => standingTeams(relevantGames, activeIds), [relevantGames, activeIds])
+
   // Seeded on the standings boundary so a level roster is dealt in a different order
   // each new session, instead of always starting from the top of the Players tab.
   const suggestedFour = useMemo(
-    () => pickNextPlayers(activePlayers, stats, Math.min(4, activePlayers.length), seasonStartedAt ?? 0),
-    [activePlayers, stats, seasonStartedAt],
+    () =>
+      pairingMode === 'record'
+        ? pickNextByRecord(activePlayers, stats, teamsInPlay, seasonStartedAt ?? 0)
+        : pickNextPlayers(activePlayers, stats, Math.min(4, activePlayers.length), seasonStartedAt ?? 0),
+    [pairingMode, activePlayers, stats, teamsInPlay, seasonStartedAt],
   )
+  const suggestedKey = suggestedFour.join(',')
 
   const [selected, setSelected] = useState<string[]>(suggestedFour)
-  const [pairingMode, setPairingMode] = useState<PairingMode>('fair')
+  const [selectionIsManual, setSelectionIsManual] = useState(false)
   const [stackingEnabled, setStackingEnabled] = useState(false)
   const [sides, setSides] = useState<Record<string, SidePreference>>({})
   const [lockedTogether, setLockedTogether] = useState<string[]>([])
   const [splitIndex, setSplitIndex] = useState(0)
 
-  // Auto-populate with the fairness engine's pick the moment a fresh 4 becomes available.
+  // Keep the selection on the engine's pick until someone chooses by hand. It has to
+  // follow the pick, not just fill an empty selection: the next match is often chosen
+  // while another court is still playing, and under win/lose stacking the result of
+  // that game decides who meets whom. A manual choice is never overridden, except once
+  // it has emptied out by those players going on court.
+  const selectionIsEmpty = selected.length === 0
   useEffect(() => {
-    if (selected.length === 0 && suggestedFour.length === 4) {
-      setSelected(suggestedFour)
-    }
-    // Only ever auto-fill an empty selection — never override a manual choice.
+    if (suggestedFour.length !== 4) return
+    if (selectionIsManual && !selectionIsEmpty) return
+    setSelectionIsManual(false)
+    setSelected(suggestedFour)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestedFour])
+  }, [suggestedKey, selectionIsManual, selectionIsEmpty])
 
   // Drop anyone from the selection who just got picked up onto another court.
   useEffect(() => {
@@ -84,9 +98,9 @@ export function NextRoundPanel({
   const lockedKey = lockedTogether.join(',')
 
   const splits = useMemo(
-    () => (canPick ? teamSplitsFor(pairingMode, selected, stats, lockedPairs) : []),
+    () => (canPick ? teamSplitsFor(pairingMode, selected, stats, lockedPairs, teamsInPlay) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [canPick, selectedKey, lockedKey, stats, pairingMode],
+    [canPick, selectedKey, lockedKey, stats, pairingMode, teamsInPlay],
   )
 
   const teams = splits[splitIndex % Math.max(splits.length, 1)] ?? null
@@ -96,6 +110,7 @@ export function NextRoundPanel({
   }, [selectedKey, lockedKey, pairingMode])
 
   const toggleSelected = (id: string) => {
+    setSelectionIsManual(true)
     setSelected((cur) => {
       if (cur.includes(id)) return cur.filter((x) => x !== id)
       if (cur.length >= 4) return cur
@@ -135,24 +150,33 @@ export function NextRoundPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, stats])
 
-  // Stacking by record can only mean something once somebody has a record. Until then
-  // every split is equally stacked, the repeat-pairing score picks one, and printing
-  // "0-0" four times would dress that up as a ranking it isn't.
-  const hasRecords = useMemo(
-    () => selected.some((id) => (stats[id]?.wins ?? 0) + (stats[id]?.losses ?? 0) > 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedKey, stats],
-  )
+  // Under win/lose stacking the thing worth showing is what the match is built on: each
+  // standing team's last result. Singles get nothing — they have no result to stack on.
+  const teamOf = (id: string) => teamsInPlay.find((t) => t.players.includes(id))
 
   const metaOf = (id: string): { text: string; accent: boolean } | null => {
     if (pairingMode === 'record') {
-      if (!hasRecords) return null
-      const s = stats[id]
-      return { text: `${s?.wins ?? 0}-${s?.losses ?? 0}`, accent: false }
+      const team = teamOf(id)
+      return team ? { text: team.result === 'won' ? 'won last' : 'lost last', accent: false } : null
     }
     if (!gamesSpread) return null
     return (stats[id]?.gamesPlayed ?? 0) === gamesSpread.min ? { text: 'most owed', accent: true } : null
   }
+
+  const recordNote = (() => {
+    if (!teams) return ''
+    const sideTeams = [teams.teamA, teams.teamB].map((pair) => {
+      const team = teamOf(pair[0])
+      return team?.players.includes(pair[1]) ? team : null
+    })
+    const [a, b] = sideTeams
+    if (!a && !b) return 'Teams form once a game finishes. Until then this splits like fair rotation.'
+    if (a && b && a.result === b.result) {
+      return a.result === 'won' ? 'Winners play winners. Teams stay together.' : 'Losers play losers. Teams stay together.'
+    }
+    if (a && b) return 'No other team with the same result is up yet, so these two cross over.'
+    return 'Teams stay together once they have played. The open spots go by court time.'
+  })()
 
   const noCourtsFree = courtCount > 0 && availableCourts.length === 0
 
@@ -254,11 +278,8 @@ export function NextRoundPanel({
               </div>
 
               <p className="text-xs text-muted -mt-1">
-                {pairingMode === 'record'
-                  ? hasRecords
-                    ? 'Still the four most owed court time, split strongest with strongest. Tap a name to move them across.'
-                    : 'No finished games yet, so this splits the same as fair rotation. Tap a name to move them across.'
-                  : 'Picked to even out court time. Tap a name to move them across.'}
+                {pairingMode === 'record' ? recordNote : 'Picked to even out court time.'} Tap a name to move them
+                across.
               </p>
 
               <div>

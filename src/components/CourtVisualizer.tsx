@@ -14,8 +14,7 @@ export function CourtVisualizer({
   // reads it rather than keeping a second, silently disagreeing copy.
   const serve = serveOf(game)
   const servingTeam = serve.team
-  const servingPair = servingTeam === 'A' ? game.teams.teamA : game.teams.teamB
-  const serverId = servingPair[serve.server - 1]
+  const serverId = serve.serverId
   const servingScore = servingTeam === 'A' ? game.scoreA : game.scoreB
 
   const positions = useMemo(
